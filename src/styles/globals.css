@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+
+  body {
+    @apply bg-slate-950 text-white font-sans;
+  }
+}
+
+@layer components {
+  .form-input {
+    @apply w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-sm text-white
+      placeholder:text-slate-500 focus:border-indigo-accent focus:outline-none focus:ring-1 focus:ring-indigo-accent;
+  }
+
+  .form-label {
+    @apply mb-1.5 block text-sm font-medium text-slate-300;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-lg bg-indigo-accent px-5 py-2.5 text-sm font-semibold
+      text-white transition-colors hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-accent
+      focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-lg border border-slate-600 bg-slate-800 px-4 py-2
+      text-sm font-medium text-slate-200 transition-colors hover:bg-slate-700 focus:outline-none focus:ring-2
+      focus:ring-slate-500 focus:ring-offset-2 focus:ring-offset-slate-950;
+  }
+
+  .markdown-body h1 {
+    @apply mb-4 mt-6 text-2xl font-bold text-white first:mt-0;
+  }
+
+  .markdown-body h2 {
+    @apply mb-3 mt-5 text-xl font-semibold text-white;
+  }
+
+  .markdown-body h3 {
+    @apply mb-2 mt-4 text-lg font-semibold text-slate-100;
+  }
+
+  .markdown-body h4 {
+    @apply mb-2 mt-3 text-base font-medium text-slate-200;
+  }
+
+  .markdown-body p {
+    @apply mb-3 text-sm leading-relaxed text-slate-300;
+  }
+
+  .markdown-body ul,
+  .markdown-body ol {
+    @apply mb-3 ml-5 list-outside text-sm text-slate-300;
+  }
+
+  .markdown-body ul {
+    @apply list-disc;
+  }
+
+  .markdown-body ol {
+    @apply list-decimal;
+  }
+
+  .markdown-body li {
+    @apply mb-1.5;
+  }
+
+  .markdown-body table {
+    @apply mb-4 w-full border-collapse text-sm;
+  }
+
+  .markdown-body th {
+    @apply border border-slate-700 bg-slate-800 px-3 py-2 text-left font-semibold text-slate-200;
+  }
+
+  .markdown-body td {
+    @apply border border-slate-700 px-3 py-2 text-slate-300;
+  }
+
+  .markdown-body code {
+    @apply rounded bg-slate-800 px-1.5 py-0.5 font-mono text-xs text-indigo-300;
+  }
+
+  .markdown-body pre {
+    @apply mb-4 overflow-x-auto rounded-lg border border-slate-700 bg-slate-900 p-4;
+  }
+
+  .markdown-body pre code {
+    @apply bg-transparent p-0 text-slate-300;
+  }
+
+  .markdown-body blockquote {
+    @apply mb-3 border-l-4 border-indigo-accent pl-4 italic text-slate-400;
+  }
+
+  .markdown-body hr {
+    @apply my-6 border-slate-700;
+  }
+
+  .markdown-body strong {
+    @apply font-semibold text-white;
+  }
+}
