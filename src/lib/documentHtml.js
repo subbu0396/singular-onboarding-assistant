@@ -71,27 +71,41 @@ const PDF_STYLES = `
     padding: 40px;
     box-sizing: border-box;
   }
+  .pdf-page-shell {
+    width: 794px;
+    height: 1157px;
+    background: #ffffff;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  .pdf-page-shell .export-document {
+    height: 100%;
+    overflow: hidden;
+  }
   .export-document h1 {
     color: #0f172a;
     font-size: 22pt;
     border-bottom: 2px solid #6366f1;
     padding-bottom: 8px;
     margin: 0 0 16px;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
-  .export-document h2 { color: #0f172a; font-size: 16pt; margin: 24px 0 8px; }
-  .export-document h3 { color: #334155; font-size: 13pt; margin: 18px 0 6px; }
-  .export-document h4 { color: #475569; font-size: 12pt; margin: 14px 0 4px; }
-  .export-document p { margin: 0 0 10px; }
+  .export-document h2 { color: #0f172a; font-size: 16pt; margin: 24px 0 8px; break-inside: avoid; page-break-inside: avoid; }
+  .export-document h3 { color: #334155; font-size: 13pt; margin: 18px 0 6px; break-inside: avoid; page-break-inside: avoid; }
+  .export-document h4 { color: #475569; font-size: 12pt; margin: 14px 0 4px; break-inside: avoid; page-break-inside: avoid; }
+  .export-document p { margin: 0 0 10px; break-inside: avoid; page-break-inside: avoid; }
   .export-document ul, .export-document ol { margin: 0 0 12px 20px; padding: 0; }
-  .export-document li { margin-bottom: 4px; }
+  .export-document li { margin-bottom: 4px; break-inside: avoid; page-break-inside: avoid; }
   .export-document table {
     border-collapse: collapse;
     width: 100%;
     margin: 12px 0;
     font-size: 10pt;
-    page-break-inside: auto;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
-  .export-document tr { page-break-inside: avoid; page-break-after: auto; }
+  .export-document tr { break-inside: avoid; page-break-inside: avoid; }
   .export-document th, .export-document td {
     border: 1px solid #cbd5e1;
     padding: 8px;
@@ -105,6 +119,8 @@ const PDF_STYLES = `
     background: #f1f5f9;
     padding: 2px 4px;
     border-radius: 3px;
+    word-break: break-all;
+    overflow-wrap: anywhere;
   }
   .export-document pre {
     font-family: Consolas, monospace;
@@ -114,20 +130,30 @@ const PDF_STYLES = `
     padding: 12px;
     border-radius: 6px;
     white-space: pre-wrap;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    break-inside: avoid;
     page-break-inside: avoid;
     margin: 0 0 12px;
   }
-  .export-document pre code { background: none; padding: 0; }
+  .export-document pre code { background: none; padding: 0; word-break: break-all; overflow-wrap: anywhere; }
   .export-document blockquote {
     border-left: 4px solid #6366f1;
     margin: 12px 0;
     padding-left: 12px;
     color: #64748b;
+    break-inside: avoid;
     page-break-inside: avoid;
   }
-  .export-document hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+  .export-document hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; break-inside: avoid; page-break-inside: avoid; }
   .export-document strong { color: #0f172a; }
 `;
+
+/** A4 printable area at 96dpi with 10mm margins (190×277mm). */
+export const PDF_PAGE_WIDTH_PX = 794;
+export const PDF_PAGE_HEIGHT_PX = Math.round(794 * (277 / 190));
+export const PDF_PAGE_PADDING_PX = 40;
+export const PDF_PAGE_INNER_HEIGHT_PX = PDF_PAGE_HEIGHT_PX - PDF_PAGE_PADDING_PX * 2;
 
 marked.use({
   gfm: true,
@@ -217,7 +243,7 @@ export function createPdfExportElement(title, markdown) {
   });
 
   document.body.appendChild(host);
-  return { host, contentEl };
+  return { host, contentEl, styleEl };
 }
 
 /** @deprecated Use buildDocxHtml or createPdfExportElement */

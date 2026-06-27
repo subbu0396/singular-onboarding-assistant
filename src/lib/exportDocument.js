@@ -1,4 +1,9 @@
-import { createPdfExportElement } from './documentHtml';
+import {
+  createPdfExportElement,
+  PDF_PAGE_HEIGHT_PX,
+  PDF_PAGE_INNER_HEIGHT_PX,
+  PDF_PAGE_WIDTH_PX,
+} from './documentHtml';
 import {
   buildCombinedMarkdown,
   getPackageFilename,
@@ -20,49 +25,141 @@ function waitForLayout() {
   });
 }
 
-function addCanvasPagesToPdf(pdf, canvas, margin, printableWidth, printableHeight) {
-  const scale = printableWidth / canvas.width;
-  const pageHeightPx = printableHeight / scale;
-  let sourceY = 0;
-  let pageIndex = 0;
+/** Split top-level blocks; long lists paginate per list item. */
+function collectPaginatableBlocks(contentEl) {
+  const blocks = [];
 
-  while (sourceY < canvas.height) {
-    const sliceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
-    const pageCanvas = document.createElement('canvas');
-    pageCanvas.width = canvas.width;
-    pageCanvas.height = sliceHeight;
+  for (const child of contentEl.children) {
+    const tag = child.tagName;
 
-    const ctx = pageCanvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-    ctx.drawImage(
-      canvas,
-      0,
-      sourceY,
-      canvas.width,
-      sliceHeight,
-      0,
-      0,
-      canvas.width,
-      sliceHeight
-    );
-
-    const imgData = pageCanvas.toDataURL('image/jpeg', 0.92);
-    const renderHeight = sliceHeight * scale;
-
-    if (pageIndex > 0) {
-      pdf.addPage();
+    if (tag === 'UL' || tag === 'OL') {
+      for (const li of child.children) {
+        const miniList = document.createElement(tag);
+        miniList.className = child.className;
+        miniList.appendChild(li.cloneNode(true));
+        blocks.push(miniList);
+      }
+      continue;
     }
 
-    pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, renderHeight);
+    if (tag === 'TABLE') {
+      const rows = child.querySelectorAll('tr');
+      if (rows.length <= 8) {
+        blocks.push(child);
+        continue;
+      }
 
-    sourceY += sliceHeight;
-    pageIndex += 1;
+      const thead = child.querySelector('thead');
+      for (let i = 0; i < rows.length; i += 6) {
+        const table = document.createElement('table');
+        table.className = child.className;
+        table.setAttribute('border', child.getAttribute('border') || '1');
+        table.setAttribute('cellpadding', child.getAttribute('cellpadding') || '6');
+        table.setAttribute('cellspacing', child.getAttribute('cellspacing') || '0');
+
+        if (thead && i === 0) {
+          table.appendChild(thead.cloneNode(true));
+        } else if (thead) {
+          table.appendChild(thead.cloneNode(true));
+        }
+
+        const tbody = document.createElement('tbody');
+        for (let j = i; j < Math.min(i + 6, rows.length); j += 1) {
+          if (rows[j].closest('thead')) continue;
+          tbody.appendChild(rows[j].cloneNode(true));
+        }
+        if (tbody.children.length) table.appendChild(tbody);
+        blocks.push(table);
+      }
+      continue;
+    }
+
+    blocks.push(child);
   }
+
+  return blocks;
+}
+
+function createMeasureHost(styleEl) {
+  const host = document.createElement('div');
+  host.setAttribute('data-pdf-measure', 'true');
+  Object.assign(host.style, {
+    position: 'fixed',
+    left: '-12000px',
+    top: '0',
+    width: `${PDF_PAGE_WIDTH_PX}px`,
+    visibility: 'hidden',
+    pointerEvents: 'none',
+  });
+  host.appendChild(styleEl.cloneNode(true));
+  document.body.appendChild(host);
+  return host;
+}
+
+function measureBlockHeight(measureHost, blocks) {
+  const shell = document.createElement('div');
+  shell.className = 'pdf-page-shell';
+
+  const inner = document.createElement('div');
+  inner.className = 'export-document';
+
+  for (const block of blocks) {
+    inner.appendChild(block.cloneNode(true));
+  }
+
+  shell.appendChild(inner);
+  measureHost.appendChild(shell);
+  const height = inner.scrollHeight;
+  measureHost.removeChild(shell);
+  return height;
+}
+
+function paginateBlocks(blocks, measureHost, maxInnerHeight) {
+  const pages = [];
+  let currentPage = [];
+
+  for (const block of blocks) {
+    const blockHeight = measureBlockHeight(measureHost, [block]);
+    const pageHeight = measureBlockHeight(measureHost, currentPage);
+
+    if (blockHeight > maxInnerHeight) {
+      if (currentPage.length) {
+        pages.push(currentPage);
+        currentPage = [];
+      }
+      pages.push([block]);
+      continue;
+    }
+
+    if (pageHeight + blockHeight > maxInnerHeight && currentPage.length > 0) {
+      pages.push(currentPage);
+      currentPage = [block];
+    } else {
+      currentPage.push(block);
+    }
+  }
+
+  if (currentPage.length) pages.push(currentPage);
+  return pages;
+}
+
+function buildPageElement(blocks) {
+  const shell = document.createElement('div');
+  shell.className = 'pdf-page-shell';
+
+  const inner = document.createElement('div');
+  inner.className = 'export-document';
+
+  for (const block of blocks) {
+    inner.appendChild(block.cloneNode(true));
+  }
+
+  shell.appendChild(inner);
+  return shell;
 }
 
 async function renderPdf(title, markdown, filename) {
-  const { host, contentEl } = createPdfExportElement(title, markdown);
+  const { host, contentEl, styleEl } = createPdfExportElement(title, markdown);
 
   try {
     await waitForLayout();
@@ -70,25 +167,50 @@ async function renderPdf(title, markdown, filename) {
     const html2canvas = (await import('html2canvas')).default;
     const { jsPDF } = await import('jspdf');
 
-    const canvas = await html2canvas(contentEl, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      logging: false,
-      width: 794,
-      windowWidth: 794,
-    });
-
-    if (canvas.width === 0 || canvas.height === 0) {
-      throw new Error('PDF render produced empty canvas');
-    }
+    const blocks = collectPaginatableBlocks(contentEl);
+    const measureHost = createMeasureHost(styleEl);
+    const pages = paginateBlocks(blocks, measureHost, PDF_PAGE_INNER_HEIGHT_PX);
+    document.body.removeChild(measureHost);
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const margin = 10;
     const printableWidth = pdf.internal.pageSize.getWidth() - margin * 2;
     const printableHeight = pdf.internal.pageSize.getHeight() - margin * 2;
 
-    addCanvasPagesToPdf(pdf, canvas, margin, printableWidth, printableHeight);
+    for (let i = 0; i < pages.length; i += 1) {
+      const pageEl = buildPageElement(pages[i]);
+      host.appendChild(pageEl);
+      await waitForLayout();
+
+      const canvas = await html2canvas(pageEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        width: PDF_PAGE_WIDTH_PX,
+        height: PDF_PAGE_HEIGHT_PX,
+        windowWidth: PDF_PAGE_WIDTH_PX,
+        windowHeight: PDF_PAGE_HEIGHT_PX,
+      });
+
+      host.removeChild(pageEl);
+
+      if (canvas.width === 0 || canvas.height === 0) {
+        throw new Error('PDF render produced empty canvas');
+      }
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const renderHeight = (canvas.height * printableWidth) / canvas.width;
+
+      if (i > 0) pdf.addPage();
+
+      if (renderHeight > printableHeight) {
+        pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, printableHeight);
+      } else {
+        pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, renderHeight);
+      }
+    }
+
     pdf.save(filename);
   } finally {
     document.body.removeChild(host);
