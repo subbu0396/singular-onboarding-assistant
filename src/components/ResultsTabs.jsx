@@ -10,6 +10,10 @@ export default function ResultsTabs({
   documents,
   errors,
   loadingDocs,
+  isStreaming = false,
+  streamingStep = '',
+  streamError = null,
+  onClearStreamError,
   clientName,
   targetMmp,
   onRegenerate,
@@ -44,6 +48,9 @@ export default function ResultsTabs({
             {targetMmp ? `${targetMmp} onboarding docs` : 'Onboarding docs'} for{' '}
             {clientName || 'your client'} — review each tab, then download the full package.
           </p>
+          {isStreaming && streamingStep && (
+            <p className="mt-2 text-xs text-indigo-400">{streamingStep}</p>
+          )}
         </div>
         <button type="button" onClick={onStartOver} className="btn-secondary shrink-0">
           Start Over
@@ -87,8 +94,23 @@ export default function ResultsTabs({
         </div>
         {!canDownloadAll && (
           <p className="mt-3 text-xs text-slate-500">
-            All three documents must finish generating before you can download the package.
+            {isStreaming
+              ? 'Documents appear below as each one finishes generating.'
+              : 'All three documents must finish generating before you can download the package.'}
           </p>
+        )}
+        {streamError && (
+          <div className="mt-3 flex items-center justify-between rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-400">
+            <span>⚠ {streamError}</span>
+            <button
+              type="button"
+              onClick={onClearStreamError}
+              className="cursor-pointer border-none bg-transparent px-1 text-base text-red-400"
+              aria-label="Dismiss error"
+            >
+              ✕
+            </button>
+          </div>
         )}
         {exportError && (
           <p className="mt-3 text-xs text-red-300">{exportError}</p>
@@ -111,6 +133,12 @@ export default function ResultsTabs({
             }`}
           >
             {DOC_LABELS[type]}
+            {isStreaming && !documents[type] && (
+              <span className="ml-2 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+            )}
+            {!isStreaming && documents[type] && (
+              <span className="ml-2 text-xs text-emerald-500">✓</span>
+            )}
           </button>
         ))}
       </div>
@@ -123,7 +151,7 @@ export default function ResultsTabs({
             title={DOC_LABELS[type]}
             content={documents[type]}
             docType={type}
-            isLoading={loadingDocs[type]}
+            isLoading={(isStreaming && !documents[type]) || loadingDocs[type]}
             error={errors[type]}
             onRegenerate={onRegenerate}
             onRetry={() => onRetry(type)}

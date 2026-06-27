@@ -79,20 +79,21 @@ export default function DocCard({
       </div>
 
       <div className="px-6 py-5">
-        {isLoading ? (
-          <div className="space-y-3">
-            <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
-            <div className="h-4 w-5/6 animate-pulse rounded bg-slate-800" />
-            <div className="h-4 w-4/6 animate-pulse rounded bg-slate-800" />
-            <div className="mt-6 h-6 w-2/5 animate-pulse rounded bg-slate-700" />
-            <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
-            <div className="h-4 w-full animate-pulse rounded bg-slate-800" />
+        {isLoading && !content ? (
+          <div className="animate-pulse space-y-3">
+            <div className="h-4 w-full rounded bg-slate-800" />
+            <div className="h-4 w-5/6 rounded bg-slate-800" />
+            <div className="h-4 w-4/6 rounded bg-slate-800" />
+            <div className="mt-6 h-6 w-2/5 rounded bg-slate-700" />
+            <div className="h-4 w-full rounded bg-slate-800" />
+            <div className="h-4 w-full rounded bg-slate-800" />
+            <div className="h-4 w-3/4 rounded bg-slate-800" />
           </div>
-        ) : (
+        ) : content ? (
           <div className="markdown-body max-h-[70vh] overflow-y-auto pr-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 export const runtime = 'edge';
-export const maxDuration = 60;
+export const maxDuration = 30;
 
 import {
   buildRunbookPrompt,
@@ -76,12 +76,12 @@ const DOC_PROMPT_BUILDERS = {
   checklist: buildChecklistPrompt,
 };
 
-async function callClaude(systemPrompts, userPrompt) {
+async function callClaude(apiKey, systemPrompts, userPrompt) {
   const response = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
       'anthropic-beta': 'prompt-caching-2024-07-31',
     },
@@ -99,17 +99,6 @@ async function callClaude(systemPrompts, userPrompt) {
   }
 
   const data = await response.json();
-
-  if (process.env.NODE_ENV === 'development') {
-    const usage = data.usage;
-    console.log('Cache stats:', {
-      input_tokens: usage.input_tokens,
-      cache_creation_tokens: usage.cache_creation_input_tokens,
-      cache_read_tokens: usage.cache_read_input_tokens,
-      output_tokens: usage.output_tokens,
-    });
-  }
-
   return data.content[0].text;
 }
 
@@ -117,47 +106,68 @@ export async function POST(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
 
   if (!apiKey) {
-    return Response.json({ error: 'Server misconfigured: API key missing' }, { status: 500 });
+    return Response.json({ error: 'API key not configured' }, { status: 500 });
   }
 
-  try {
-    const { form, docType, generateAll } = await req.json();
+  const body = await req.json();
 
-    if (!form) {
-      return Response.json({ error: 'Form data is required' }, { status: 400 });
-    }
-
-    if (generateAll) {
-      const [runbook, faq, checklist] = await Promise.all([
-        callClaude([CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK], buildRunbookPrompt(form)),
-        callClaude([CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK], buildFaqPrompt(form)),
-        callClaude([CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK], buildChecklistPrompt(form)),
-      ]);
-
-      return Response.json({ documents: { runbook, faq, checklist } });
-    }
-
-    if (!docType) {
-      return Response.json(
-        { error: 'docType is required for single document generation' },
-        { status: 400 }
-      );
-    }
-
-    const systemPrompts = DOC_SYSTEM_BLOCKS[docType];
-    const buildUserPrompt = DOC_PROMPT_BUILDERS[docType];
+  if (body.docType && body.form) {
+    const systemPrompts = DOC_SYSTEM_BLOCKS[body.docType];
+    const buildUserPrompt = DOC_PROMPT_BUILDERS[body.docType];
 
     if (!systemPrompts || !buildUserPrompt) {
-      return Response.json({ error: `Unknown document type: ${docType}` }, { status: 400 });
+      return Response.json({ error: `Unknown document type: ${body.docType}` }, { status: 400 });
     }
 
-    const content = await callClaude(systemPrompts, buildUserPrompt(form));
-    return Response.json({ docType, content });
-  } catch (error) {
-    console.error('Document generation error:', error);
-    return Response.json(
-      { error: error.message || 'Document generation failed' },
-      { status: 500 }
-    );
+    try {
+      const content = await callClaude(apiKey, systemPrompts, buildUserPrompt(body.form));
+      return Response.json({ docType: body.docType, content });
+    } catch (error) {
+      console.error('Document generation error:', error);
+      return Response.json(
+        { error: error.message || 'Document generation failed' },
+        { status: 500 }
+      );
+    }
   }
+
+  const formData = body;
+
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (payload) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      };
+
+      try {
+        await Promise.all([
+          callClaude(apiKey, [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK], buildRunbookPrompt(formData)).then(
+            (text) => send({ type: 'runbook', content: text })
+          ),
+          callClaude(apiKey, [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK], buildFaqPrompt(formData)).then((text) =>
+            send({ type: 'faq', content: text })
+          ),
+          callClaude(apiKey, [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK], buildChecklistPrompt(formData)).then(
+            (text) => send({ type: 'checklist', content: text })
+          ),
+        ]);
+
+        send({ type: 'done' });
+      } catch (err) {
+        send({ type: 'error', message: err.message || 'Generation failed' });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 }

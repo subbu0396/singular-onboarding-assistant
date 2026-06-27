@@ -37,29 +37,66 @@ export default function Home() {
     setFormData(form);
     setDocuments(EMPTY_DOCS);
     setErrors(EMPTY_ERRORS);
+    setView('results');
 
     try {
       setLoadingStep('Analyzing tech stack...');
-      await new Promise((r) => setTimeout(r, 700));
 
-      setLoadingStep('Generating documents...');
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ form, generateAll: true }),
+        body: JSON.stringify(form),
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Request failed (${res.status})`);
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      if (!res.body) throw new Error('No response stream received');
+
+      setLoadingStep('Generating documents...');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+
+          let parsed;
+          try {
+            parsed = JSON.parse(trimmed.slice(6));
+          } catch (parseErr) {
+            console.warn('SSE parse error:', parseErr);
+            continue;
+          }
+
+          if (parsed.type === 'runbook') {
+            setDocuments((prev) => ({ ...prev, runbook: parsed.content }));
+            setLoadingStep('Runbook ready — generating FAQ and checklist...');
+          }
+          if (parsed.type === 'faq') {
+            setDocuments((prev) => ({ ...prev, faq: parsed.content }));
+            setLoadingStep('FAQ ready — generating checklist...');
+          }
+          if (parsed.type === 'checklist') {
+            setDocuments((prev) => ({ ...prev, checklist: parsed.content }));
+            setLoadingStep('All documents ready...');
+          }
+          if (parsed.type === 'done') {
+            setLoadingStep('');
+          }
+          if (parsed.type === 'error') {
+            throw new Error(parsed.message);
+          }
+        }
       }
-
-      setLoadingStep('Finalizing...');
-      await new Promise((r) => setTimeout(r, 400));
-
-      const data = await res.json();
-      setDocuments(data.documents);
-      setView('results');
     } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.');
     } finally {
@@ -160,6 +197,10 @@ export default function Home() {
             documents={documents}
             errors={errors}
             loadingDocs={loadingDocs}
+            isStreaming={isLoading}
+            streamingStep={loadingStep}
+            streamError={error}
+            onClearStreamError={() => setError(null)}
             clientName={formData?.clientName}
             targetMmp={formData?.targetMmp}
             onRegenerate={regenerateDoc}
