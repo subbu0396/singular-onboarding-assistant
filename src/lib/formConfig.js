@@ -180,6 +180,69 @@ export function formatList(items) {
   return items.join(', ');
 }
 
+export function validateSection(sectionIndex, formData) {
+  const newErrors = {};
+
+  if (sectionIndex === 0) {
+    if (!formData.clientName?.trim()) {
+      newErrors.clientName = 'Client name is required';
+    }
+    if (!formData.industry || formData.industry === 'Select...') {
+      newErrors.industry = 'Please select an industry';
+    }
+    if (!formData.primaryMarket || formData.primaryMarket === 'Select...') {
+      newErrors.primaryMarket = 'Please select a market';
+    }
+  }
+
+  if (sectionIndex === 1) {
+    if (!formData.platforms?.length) {
+      newErrors.platforms = 'Select at least one platform';
+    }
+    if (!formData.currentMmp || formData.currentMmp === 'Select...') {
+      newErrors.currentMMP = 'Please select current MMP';
+    }
+    if (!formData.attributionModel || formData.attributionModel === 'Select...') {
+      newErrors.attributionModel = 'Please select attribution model';
+    }
+  }
+
+  if (sectionIndex === 2) {
+    if (!formData.integrationMethods?.length) {
+      newErrors.integrationMethods = 'Select at least one integration method';
+    }
+    if (!formData.dataExportMethods?.length) {
+      newErrors.exportMethods = 'Select at least one export method';
+    }
+    if (!formData.eventTrackingMethod || formData.eventTrackingMethod === 'Select...') {
+      newErrors.eventTracking = 'Please select event tracking method';
+    }
+  }
+
+  if (sectionIndex === 3) {
+    if (!formData.backendLanguage || formData.backendLanguage === 'Select...') {
+      newErrors.backendLanguage = 'Please select backend language';
+    }
+    if (!formData.authMethod || formData.authMethod === 'Select...') {
+      newErrors.authMethod = 'Please select auth method';
+    }
+    if (formData.usesCdp && !formData.cdpName?.trim()) {
+      newErrors.cdpName = 'CDP name is required when CDP is enabled';
+    }
+  }
+
+  if (sectionIndex === 4) {
+    if (!formData.targetGoLiveDate) {
+      newErrors.goLiveDate = 'Please select a go-live date';
+    }
+    if (!formData.onboardingUrgency || formData.onboardingUrgency === 'Select...') {
+      newErrors.urgency = 'Please select onboarding urgency';
+    }
+  }
+
+  return newErrors;
+}
+
 export function validateForm(form) {
   const errors = [];
 

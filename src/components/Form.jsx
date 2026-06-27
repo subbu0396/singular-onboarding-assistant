@@ -14,12 +14,17 @@ import {
   URGENCY_OPTIONS,
   TARGET_MMP_PLATFORMS,
   INITIAL_FORM_STATE,
-  validateForm,
+  validateSection,
   resetSectionFields,
   isSectionDirty,
 } from '@/lib/formConfig';
 
-function CheckboxGroup({ label, options, selected, onChange }) {
+function FieldError({ message }) {
+  if (!message) return null;
+  return <p className="mt-1 text-xs text-red-400">{message}</p>;
+}
+
+function CheckboxGroup({ id, label, options, selected, onChange, error }) {
   const toggle = (option) => {
     const next = selected.includes(option)
       ? selected.filter((item) => item !== option)
@@ -28,7 +33,7 @@ function CheckboxGroup({ label, options, selected, onChange }) {
   };
 
   return (
-    <div>
+    <div id={id}>
       <label className="form-label">{label}</label>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         {options.map((option) => (
@@ -46,13 +51,14 @@ function CheckboxGroup({ label, options, selected, onChange }) {
           </label>
         ))}
       </div>
+      <FieldError message={error} />
     </div>
   );
 }
 
-function SelectField({ label, value, onChange, options, placeholder }) {
+function SelectField({ id, label, value, onChange, options, placeholder, error }) {
   return (
-    <div>
+    <div id={id}>
       <label className="form-label">{label}</label>
       <select className="form-input" value={value} onChange={(e) => onChange(e.target.value)}>
         <option value="">{placeholder || 'Select...'}</option>
@@ -62,6 +68,7 @@ function SelectField({ label, value, onChange, options, placeholder }) {
           </option>
         ))}
       </select>
+      <FieldError message={error} />
     </div>
   );
 }
@@ -89,23 +96,60 @@ function ToggleField({ label, value, onChange }) {
   );
 }
 
+function scrollToFirstError(errorKeys) {
+  const firstErrorKey = errorKeys[0];
+  if (!firstErrorKey) return;
+  document.getElementById(firstErrorKey)?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center',
+  });
+}
+
 export default function Form({ onSubmit, isLoading }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [form, setForm] = useState(INITIAL_FORM_STATE);
-  const [errors, setErrors] = useState([]);
+  const [errors, setErrors] = useState({});
 
-  const update = (field, value) => {
+  const clearError = (errorKey) => {
+    setErrors((prev) => {
+      if (!prev[errorKey]) return prev;
+      const next = { ...prev };
+      delete next[errorKey];
+      return next;
+    });
+  };
+
+  const update = (field, value, errorKey = field) => {
     setForm((prev) => ({ ...prev, [field]: value }));
-    setErrors([]);
+    clearError(errorKey);
+  };
+
+  const handleNext = () => {
+    const newErrors = validateSection(currentStep, form);
+    const errorKeys = Object.keys(newErrors);
+
+    if (errorKeys.length > 0) {
+      setErrors(newErrors);
+      scrollToFirstError(errorKeys);
+      return;
+    }
+
+    setErrors({});
+    setCurrentStep((prev) => Math.min(prev + 1, SECTIONS.length - 1));
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const validationErrors = validateForm(form);
-    if (validationErrors.length > 0) {
-      setErrors(validationErrors);
+    const newErrors = validateSection(currentStep, form);
+    const errorKeys = Object.keys(newErrors);
+
+    if (errorKeys.length > 0) {
+      setErrors(newErrors);
+      scrollToFirstError(errorKeys);
       return;
     }
+
+    setErrors({});
     onSubmit(form);
   };
 
@@ -113,13 +157,13 @@ export default function Form({ onSubmit, isLoading }) {
 
   const handleResetSection = () => {
     setForm((prev) => resetSectionFields(prev, section.key));
-    setErrors([]);
+    setErrors({});
   };
 
   const handleStartOver = () => {
     setForm(INITIAL_FORM_STATE);
     setCurrentStep(0);
-    setErrors([]);
+    setErrors({});
   };
 
   const sectionIsDirty = isSectionDirty(form, section.key);
@@ -129,7 +173,7 @@ export default function Form({ onSubmit, isLoading }) {
       case 'clientInfo':
         return (
           <div className="space-y-4">
-            <div>
+            <div id="clientName">
               <label className="form-label">Client Name</label>
               <input
                 type="text"
@@ -138,6 +182,7 @@ export default function Form({ onSubmit, isLoading }) {
                 value={form.clientName}
                 onChange={(e) => update('clientName', e.target.value)}
               />
+              <FieldError message={errors.clientName} />
             </div>
             <SelectField
               label="Target MMP Platform"
@@ -150,16 +195,20 @@ export default function Form({ onSubmit, isLoading }) {
               Documents will be generated for the selected mobile measurement platform.
             </p>
             <SelectField
+              id="industry"
               label="Industry"
               value={form.industry}
               onChange={(v) => update('industry', v)}
               options={INDUSTRIES}
+              error={errors.industry}
             />
             <SelectField
+              id="primaryMarket"
               label="Primary Market"
               value={form.primaryMarket}
               onChange={(v) => update('primaryMarket', v)}
               options={PRIMARY_MARKETS}
+              error={errors.primaryMarket}
             />
           </div>
         );
@@ -168,23 +217,29 @@ export default function Form({ onSubmit, isLoading }) {
         return (
           <div className="space-y-4">
             <CheckboxGroup
+              id="platforms"
               label="Platforms"
               options={PLATFORMS}
               selected={form.platforms}
               onChange={(v) => update('platforms', v)}
+              error={errors.platforms}
             />
             <SelectField
+              id="currentMMP"
               label="Current / Previous MMP"
               value={form.currentMmp}
-              onChange={(v) => update('currentMmp', v)}
+              onChange={(v) => update('currentMmp', v, 'currentMMP')}
               options={CURRENT_MMP_OPTIONS}
               placeholder="Select if migrating..."
+              error={errors.currentMMP}
             />
             <SelectField
+              id="attributionModel"
               label="Attribution Model Preference"
               value={form.attributionModel}
               onChange={(v) => update('attributionModel', v)}
               options={ATTRIBUTION_MODELS}
+              error={errors.attributionModel}
             />
           </div>
         );
@@ -193,22 +248,28 @@ export default function Form({ onSubmit, isLoading }) {
         return (
           <div className="space-y-4">
             <CheckboxGroup
+              id="integrationMethods"
               label="Integration Methods to Configure"
               options={INTEGRATION_METHODS}
               selected={form.integrationMethods}
               onChange={(v) => update('integrationMethods', v)}
+              error={errors.integrationMethods}
             />
             <CheckboxGroup
+              id="exportMethods"
               label="Data Export Method"
               options={DATA_EXPORT_METHODS}
               selected={form.dataExportMethods}
-              onChange={(v) => update('dataExportMethods', v)}
+              onChange={(v) => update('dataExportMethods', v, 'exportMethods')}
+              error={errors.exportMethods}
             />
             <SelectField
+              id="eventTracking"
               label="Event Tracking Method"
               value={form.eventTrackingMethod}
-              onChange={(v) => update('eventTrackingMethod', v)}
+              onChange={(v) => update('eventTrackingMethod', v, 'eventTracking')}
               options={EVENT_TRACKING_METHODS}
+              error={errors.eventTracking}
             />
           </div>
         );
@@ -217,10 +278,12 @@ export default function Form({ onSubmit, isLoading }) {
         return (
           <div className="space-y-4">
             <SelectField
+              id="backendLanguage"
               label="Backend Language"
               value={form.backendLanguage}
               onChange={(v) => update('backendLanguage', v)}
               options={BACKEND_LANGUAGES}
+              error={errors.backendLanguage}
             />
             <ToggleField
               label="Has existing data warehouse?"
@@ -233,7 +296,7 @@ export default function Form({ onSubmit, isLoading }) {
               onChange={(v) => update('usesCdp', v)}
             />
             {form.usesCdp && (
-              <div>
+              <div id="cdpName">
                 <label className="form-label">CDP Name</label>
                 <input
                   type="text"
@@ -242,13 +305,16 @@ export default function Form({ onSubmit, isLoading }) {
                   value={form.cdpName}
                   onChange={(e) => update('cdpName', e.target.value)}
                 />
+                <FieldError message={errors.cdpName} />
               </div>
             )}
             <SelectField
+              id="authMethod"
               label="Authentication Method in Use"
               value={form.authMethod}
               onChange={(v) => update('authMethod', v)}
               options={AUTH_METHODS}
+              error={errors.authMethod}
             />
           </div>
         );
@@ -256,20 +322,23 @@ export default function Form({ onSubmit, isLoading }) {
       case 'timeline':
         return (
           <div className="space-y-4">
-            <div>
+            <div id="goLiveDate">
               <label className="form-label">Target Go-Live Date</label>
               <input
                 type="date"
                 className="form-input form-date-input"
                 value={form.targetGoLiveDate}
-                onChange={(e) => update('targetGoLiveDate', e.target.value)}
+                onChange={(e) => update('targetGoLiveDate', e.target.value, 'goLiveDate')}
               />
+              <FieldError message={errors.goLiveDate} />
             </div>
             <SelectField
+              id="urgency"
               label="Onboarding Urgency"
               value={form.onboardingUrgency}
-              onChange={(v) => update('onboardingUrgency', v)}
+              onChange={(v) => update('onboardingUrgency', v, 'urgency')}
               options={URGENCY_OPTIONS}
+              error={errors.urgency}
             />
           </div>
         );
@@ -325,17 +394,6 @@ export default function Form({ onSubmit, isLoading }) {
 
         {renderSection()}
 
-        {errors.length > 0 && (
-          <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
-            <p className="text-sm font-medium text-red-400">Please fix the following:</p>
-            <ul className="mt-1 list-inside list-disc text-sm text-red-300">
-              {errors.map((err) => (
-                <li key={err}>{err}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
         <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-800 pt-4">
           <button
             type="button"
@@ -366,11 +424,7 @@ export default function Form({ onSubmit, isLoading }) {
           </button>
 
           {currentStep < SECTIONS.length - 1 ? (
-            <button
-              type="button"
-              onClick={() => setCurrentStep((s) => Math.min(SECTIONS.length - 1, s + 1))}
-              className="btn-primary"
-            >
+            <button type="button" onClick={handleNext} className="btn-primary">
               Next
             </button>
           ) : (
