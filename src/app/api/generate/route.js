@@ -1,12 +1,16 @@
 export const runtime = 'edge';
-export const maxDuration = 30;
+export const maxDuration = 60;
 
+import Anthropic from '@anthropic-ai/sdk';
 import {
   buildRunbookPrompt,
   buildFaqPrompt,
   buildChecklistPrompt,
 } from '@/lib/server/claudeClient';
 import { retrievePatterns } from '@/lib/retrievePatterns';
+
+const MODEL = 'claude-sonnet-4-6';
+const MAX_TOKENS = 6000;
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -77,31 +81,68 @@ const DOC_PROMPT_BUILDERS = {
   checklist: buildChecklistPrompt,
 };
 
-async function callClaude(apiKey, systemPrompts, userPrompt) {
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'prompt-caching-2024-07-31',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2000,
+async function streamDoc(client, docType, systemPrompts, userPrompt, send) {
+  try {
+    const stream = client.messages.stream({
+      model: MODEL,
+      max_tokens: MAX_TOKENS,
       system: systemPrompts,
       messages: [{ role: 'user', content: userPrompt }],
-    }),
-  });
+    });
 
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err.error?.message || `Claude API error ${response.status}`);
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        send({ type: `${docType}_delta`, delta: event.delta.text });
+      }
+    }
+
+    const final = await stream.finalMessage();
+
+    if (final.stop_reason === 'refusal') {
+      send({
+        type: `${docType}_error`,
+        message: 'Content was declined by safety filters.',
+      });
+      return;
+    }
+
+    send({ type: `${docType}_complete`, stop_reason: final.stop_reason });
+  } catch (err) {
+    const message =
+      err instanceof Anthropic.APIError
+        ? `${docType} generation failed (${err.status}): ${err.message}`
+        : err?.message || `${docType} generation failed`;
+    send({ type: `${docType}_error`, message });
   }
-
-  const data = await response.json();
-  return data.content[0].text;
 }
+
+function buildSSEStream(work) {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      const send = (payload) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+      };
+      try {
+        await work(send);
+        send({ type: 'done' });
+      } catch (err) {
+        send({ type: 'error', message: err?.message || 'Generation failed' });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+}
+
+const SSE_HEADERS = {
+  'Content-Type': 'text/event-stream',
+  'Cache-Control': 'no-cache',
+  Connection: 'keep-alive',
+};
 
 export async function POST(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -111,77 +152,64 @@ export async function POST(req) {
   }
 
   const body = await req.json();
+  const client = new Anthropic({ apiKey });
 
+  // Single-doc (regenerate) path
   if (body.docType && body.form) {
     const systemPrompts = DOC_SYSTEM_BLOCKS[body.docType];
     const buildUserPrompt = DOC_PROMPT_BUILDERS[body.docType];
 
     if (!systemPrompts || !buildUserPrompt) {
-      return Response.json({ error: `Unknown document type: ${body.docType}` }, { status: 400 });
+      return Response.json(
+        { error: `Unknown document type: ${body.docType}` },
+        { status: 400 }
+      );
     }
 
-    try {
+    const stream = buildSSEStream(async (send) => {
       const ragContext = await retrievePatterns(body.form);
-      const content = await callClaude(
-        apiKey,
+      await streamDoc(
+        client,
+        body.docType,
         systemPrompts,
-        buildUserPrompt(body.form, ragContext)
+        buildUserPrompt(body.form, ragContext),
+        send
       );
-      return Response.json({ docType: body.docType, content });
-    } catch (error) {
-      console.error('Document generation error:', error);
-      return Response.json(
-        { error: error.message || 'Document generation failed' },
-        { status: 500 }
-      );
-    }
+    });
+
+    return new Response(stream, { headers: SSE_HEADERS });
   }
 
+  // Full generation path: stream all three in parallel
   const formData = body;
 
-  const encoder = new TextEncoder();
+  const stream = buildSSEStream(async (send) => {
+    const ragContext = await retrievePatterns(formData);
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const send = (payload) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-      };
-
-      try {
-        const ragContext = await retrievePatterns(formData);
-
-        await Promise.all([
-          callClaude(
-            apiKey,
-            [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK],
-            buildRunbookPrompt(formData, ragContext)
-          ).then((text) => send({ type: 'runbook', content: text })),
-          callClaude(
-            apiKey,
-            [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK],
-            buildFaqPrompt(formData, ragContext)
-          ).then((text) => send({ type: 'faq', content: text })),
-          callClaude(
-            apiKey,
-            [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK],
-            buildChecklistPrompt(formData, ragContext)
-          ).then((text) => send({ type: 'checklist', content: text })),
-        ]);
-
-        send({ type: 'done' });
-      } catch (err) {
-        send({ type: 'error', message: err.message || 'Generation failed' });
-      } finally {
-        controller.close();
-      }
-    },
+    await Promise.allSettled([
+      streamDoc(
+        client,
+        'runbook',
+        [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK],
+        buildRunbookPrompt(formData, ragContext),
+        send
+      ),
+      streamDoc(
+        client,
+        'faq',
+        [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK],
+        buildFaqPrompt(formData, ragContext),
+        send
+      ),
+      streamDoc(
+        client,
+        'checklist',
+        [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK],
+        buildChecklistPrompt(formData, ragContext),
+        send
+      ),
+    ]);
   });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
-  });
+  return new Response(stream, { headers: SSE_HEADERS });
 }
