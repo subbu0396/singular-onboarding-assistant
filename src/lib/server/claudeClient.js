@@ -1,12 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { formatList } from '../formConfig';
-
-const MODEL = 'claude-sonnet-4-6';
-const MAX_TOKENS = 2000;
-
-function getClient(apiKey) {
-  return new Anthropic({ apiKey });
-}
 
 function getPlatform(form) {
   return form.targetMmp || 'Mobile Measurement Platform';
@@ -143,58 +135,6 @@ ${skadSection}
 Each item should have: [ ] checkbox, test description, expected result, pass criteria. Use markdown formatting.
 
 Generate the Checklist now.`;
-}
-
-function buildSystemPrompt(form, role) {
-  const platform = getPlatform(form);
-  return `${role} You are creating client-facing onboarding documentation for ${platform}, a mobile measurement and attribution platform. Use ${platform}-specific SDK names, features, dashboard terminology, and integration patterns throughout.`;
-}
-
-const PROMPT_BUILDERS = {
-  runbook: {
-    system: (form) => buildSystemPrompt(form, 'You are a senior integrations engineer.'),
-    buildUser: buildRunbookPrompt,
-  },
-  faq: {
-    system: (form) => buildSystemPrompt(form, 'You are a technical account manager creating onboarding FAQs.'),
-    buildUser: buildFaqPrompt,
-  },
-  checklist: {
-    system: (form) => buildSystemPrompt(form, 'You are a QA engineer specializing in mobile attribution testing.'),
-    buildUser: buildChecklistPrompt,
-  },
-};
-
-export async function generateDocument(docType, form, apiKey) {
-  const config = PROMPT_BUILDERS[docType];
-  if (!config) {
-    throw new Error(`Unknown document type: ${docType}`);
-  }
-
-  const client = getClient(apiKey);
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: MAX_TOKENS,
-    system: config.system(form),
-    messages: [{ role: 'user', content: config.buildUser(form) }],
-  });
-
-  const textBlock = response.content.find((block) => block.type === 'text');
-  if (!textBlock?.text) {
-    throw new Error('No text content returned from Claude');
-  }
-
-  return textBlock.text;
-}
-
-export async function generateAllDocuments(form, apiKey) {
-  const [runbook, faq, checklist] = await Promise.all([
-    generateDocument('runbook', form, apiKey),
-    generateDocument('faq', form, apiKey),
-    generateDocument('checklist', form, apiKey),
-  ]);
-
-  return { runbook, faq, checklist };
 }
 
 export { buildRunbookPrompt, buildFaqPrompt, buildChecklistPrompt };
