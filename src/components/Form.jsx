@@ -245,7 +245,7 @@ export default function Form({ onSubmit, isLoading }) {
               <label className="form-label">Target Go-Live Date</label>
               <input
                 type="date"
-                className="form-input"
+                className="form-input form-date-input"
                 value={form.targetGoLiveDate}
                 onChange={(e) => update('targetGoLiveDate', e.target.value)}
               />
