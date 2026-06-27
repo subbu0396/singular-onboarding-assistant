@@ -1,6 +1,5 @@
 import {
   createPdfExportElement,
-  PDF_PAGE_HEIGHT_PX,
   PDF_PAGE_INNER_HEIGHT_PX,
   PDF_PAGE_WIDTH_PX,
 } from './documentHtml';
@@ -25,7 +24,7 @@ function waitForLayout() {
   });
 }
 
-/** Split top-level blocks; long lists paginate per list item. */
+/** Top-level DOM blocks used for pagination. Lists stay intact unless split later. */
 function collectPaginatableBlocks(contentEl) {
   const blocks = [];
 
@@ -33,12 +32,7 @@ function collectPaginatableBlocks(contentEl) {
     const tag = child.tagName;
 
     if (tag === 'UL' || tag === 'OL') {
-      for (const li of child.children) {
-        const miniList = document.createElement(tag);
-        miniList.className = child.className;
-        miniList.appendChild(li.cloneNode(true));
-        blocks.push(miniList);
-      }
+      blocks.push(child);
       continue;
     }
 
@@ -57,9 +51,7 @@ function collectPaginatableBlocks(contentEl) {
         table.setAttribute('cellpadding', child.getAttribute('cellpadding') || '6');
         table.setAttribute('cellspacing', child.getAttribute('cellspacing') || '0');
 
-        if (thead && i === 0) {
-          table.appendChild(thead.cloneNode(true));
-        } else if (thead) {
+        if (thead) {
           table.appendChild(thead.cloneNode(true));
         }
 
@@ -96,22 +88,65 @@ function createMeasureHost(styleEl) {
   return host;
 }
 
-function measureBlockHeight(measureHost, blocks) {
-  const shell = document.createElement('div');
-  shell.className = 'pdf-page-shell';
+function measureBlocksHeight(measureHost, blockNodes) {
+  if (!blockNodes.length) return 0;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'pdf-measure';
 
   const inner = document.createElement('div');
   inner.className = 'export-document';
 
-  for (const block of blocks) {
+  for (const block of blockNodes) {
     inner.appendChild(block.cloneNode(true));
   }
 
-  shell.appendChild(inner);
-  measureHost.appendChild(shell);
-  const height = inner.scrollHeight;
-  measureHost.removeChild(shell);
+  wrapper.appendChild(inner);
+  measureHost.appendChild(wrapper);
+  const height = inner.offsetHeight;
+  measureHost.removeChild(wrapper);
   return height;
+}
+
+function splitListBlock(listEl, measureHost, maxInnerHeight) {
+  const tag = listEl.tagName;
+  const items = [...listEl.children];
+  const chunks = [];
+  let currentItems = [];
+
+  for (const li of items) {
+    const miniList = document.createElement(tag);
+    miniList.className = listEl.className;
+    for (const item of currentItems) {
+      miniList.appendChild(item.cloneNode(true));
+    }
+    miniList.appendChild(li.cloneNode(true));
+
+    const height = measureBlocksHeight(measureHost, [miniList]);
+
+    if (height > maxInnerHeight && currentItems.length > 0) {
+      const flushList = document.createElement(tag);
+      flushList.className = listEl.className;
+      for (const item of currentItems) {
+        flushList.appendChild(item.cloneNode(true));
+      }
+      chunks.push(flushList);
+      currentItems = [li];
+    } else {
+      currentItems.push(li);
+    }
+  }
+
+  if (currentItems.length) {
+    const flushList = document.createElement(tag);
+    flushList.className = listEl.className;
+    for (const item of currentItems) {
+      flushList.appendChild(item.cloneNode(true));
+    }
+    chunks.push(flushList);
+  }
+
+  return chunks.length ? chunks : [listEl];
 }
 
 function paginateBlocks(blocks, measureHost, maxInnerHeight) {
@@ -119,23 +154,30 @@ function paginateBlocks(blocks, measureHost, maxInnerHeight) {
   let currentPage = [];
 
   for (const block of blocks) {
-    const blockHeight = measureBlockHeight(measureHost, [block]);
-    const pageHeight = measureBlockHeight(measureHost, currentPage);
+    const candidates =
+      block.tagName === 'UL' || block.tagName === 'OL'
+        ? splitListBlock(block, measureHost, maxInnerHeight)
+        : [block];
 
-    if (blockHeight > maxInnerHeight) {
-      if (currentPage.length) {
-        pages.push(currentPage);
-        currentPage = [];
+    for (const candidate of candidates) {
+      const blockHeight = measureBlocksHeight(measureHost, [candidate]);
+      const pageHeight = measureBlocksHeight(measureHost, currentPage);
+
+      if (blockHeight > maxInnerHeight) {
+        if (currentPage.length) {
+          pages.push(currentPage);
+          currentPage = [];
+        }
+        pages.push([candidate]);
+        continue;
       }
-      pages.push([block]);
-      continue;
-    }
 
-    if (pageHeight + blockHeight > maxInnerHeight && currentPage.length > 0) {
-      pages.push(currentPage);
-      currentPage = [block];
-    } else {
-      currentPage.push(block);
+      if (pageHeight + blockHeight > maxInnerHeight && currentPage.length > 0) {
+        pages.push(currentPage);
+        currentPage = [candidate];
+      } else {
+        currentPage.push(candidate);
+      }
     }
   }
 
@@ -144,8 +186,8 @@ function paginateBlocks(blocks, measureHost, maxInnerHeight) {
 }
 
 function buildPageElement(blocks) {
-  const shell = document.createElement('div');
-  shell.className = 'pdf-page-shell';
+  const wrapper = document.createElement('div');
+  wrapper.className = 'pdf-page';
 
   const inner = document.createElement('div');
   inner.className = 'export-document';
@@ -154,8 +196,8 @@ function buildPageElement(blocks) {
     inner.appendChild(block.cloneNode(true));
   }
 
-  shell.appendChild(inner);
-  return shell;
+  wrapper.appendChild(inner);
+  return wrapper;
 }
 
 async function renderPdf(title, markdown, filename) {
@@ -182,15 +224,17 @@ async function renderPdf(title, markdown, filename) {
       host.appendChild(pageEl);
       await waitForLayout();
 
+      const contentHeight = pageEl.offsetHeight;
+
       const canvas = await html2canvas(pageEl, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
         width: PDF_PAGE_WIDTH_PX,
-        height: PDF_PAGE_HEIGHT_PX,
+        height: contentHeight,
         windowWidth: PDF_PAGE_WIDTH_PX,
-        windowHeight: PDF_PAGE_HEIGHT_PX,
+        windowHeight: contentHeight,
       });
 
       host.removeChild(pageEl);
@@ -204,11 +248,14 @@ async function renderPdf(title, markdown, filename) {
 
       if (i > 0) pdf.addPage();
 
-      if (renderHeight > printableHeight) {
-        pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, printableHeight);
-      } else {
-        pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, renderHeight);
-      }
+      pdf.addImage(
+        imgData,
+        'JPEG',
+        margin,
+        margin,
+        printableWidth,
+        Math.min(renderHeight, printableHeight)
+      );
     }
 
     pdf.save(filename);

@@ -71,16 +71,22 @@ const PDF_STYLES = `
     padding: 40px;
     box-sizing: border-box;
   }
-  .pdf-page-shell {
+  .pdf-measure {
     width: 794px;
-    height: 1157px;
+    box-sizing: border-box;
+  }
+  .pdf-measure .export-document {
+    padding: 40px;
+    box-sizing: border-box;
+  }
+  .pdf-page {
+    width: 794px;
     background: #ffffff;
     box-sizing: border-box;
-    overflow: hidden;
   }
-  .pdf-page-shell .export-document {
-    height: 100%;
-    overflow: hidden;
+  .pdf-page .export-document {
+    padding: 40px;
+    box-sizing: border-box;
   }
   .export-document h1 {
     color: #0f172a;
