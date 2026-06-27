@@ -19,6 +19,8 @@ import {
   validateSection,
   resetSectionFields,
   isSectionDirty,
+  getDemoFormData,
+  DEMO_SECTION_INDEX,
 } from '@/lib/formConfig';
 
 function FieldError({ message }) {
@@ -142,6 +144,7 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
   const [currentStep, setCurrentStep] = useState(0);
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
+  const [demoBanner, setDemoBanner] = useState(false);
 
   const clearError = (errorKey) => {
     setErrors((prev) => {
@@ -201,6 +204,15 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
     setForm(INITIAL_FORM_STATE);
     setCurrentStep(0);
     setErrors({});
+    setDemoBanner(false);
+  };
+
+  const handleTryDemo = () => {
+    setForm(getDemoFormData());
+    setErrors({});
+    setDemoBanner(true);
+    setCurrentStep(DEMO_SECTION_INDEX);
+    onClearError?.();
   };
 
   const sectionIsDirty = isSectionDirty(form, section.key);
@@ -210,6 +222,14 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
       case 'clientInfo':
         return (
           <div className="space-y-4">
+            <button
+              type="button"
+              onClick={handleTryDemo}
+              disabled={isLoading}
+              className="btn-secondary w-full sm:w-auto disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Try Demo →
+            </button>
             <div id="clientName">
               <label className="form-label">Client Name</label>
               <input
@@ -427,6 +447,12 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
           />
         </div>
       </nav>
+
+      {demoBanner && (
+        <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-400">
+          Form prefilled with Airtel Digital demo data
+        </div>
+      )}
 
       {/* Section panel */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6 sm:p-8">

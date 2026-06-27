@@ -143,6 +143,41 @@ export const INITIAL_FORM_STATE = {
   onboardingUrgency: '',
 };
 
+function formatDateInput(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/** Realistic sample data for the Try Demo flow. */
+export function getDemoFormData() {
+  const goLiveDate = new Date();
+  goLiveDate.setDate(goLiveDate.getDate() + 42);
+
+  return {
+    clientName: 'Airtel Digital',
+    targetMmp: 'Singular',
+    industry: 'E-commerce',
+    primaryMarket: 'India',
+    platforms: ['iOS', 'Android'],
+    currentMmp: 'None',
+    attributionModel: 'Last Touch',
+    integrationMethods: ['S2S Postbacks', 'Google Ads'],
+    dataExportMethods: ['Snowflake'],
+    eventTrackingMethod: 'SDK Events',
+    backendLanguage: 'Node.js',
+    hasDataWarehouse: true,
+    usesCdp: false,
+    cdpName: '',
+    authMethod: 'OAuth 2.0',
+    targetGoLiveDate: formatDateInput(goLiveDate),
+    onboardingUrgency: 'Standard 4-6 weeks',
+  };
+}
+
+export const DEMO_SECTION_INDEX = SECTIONS.length - 1;
+
 export const SECTION_FIELDS = {
   clientInfo: ['clientName', 'targetMmp', 'industry', 'primaryMarket'],
   sdkSetup: ['platforms', 'currentMmp', 'attributionModel'],
