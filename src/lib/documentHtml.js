@@ -70,6 +70,8 @@ const PDF_STYLES = `
     background: #ffffff;
     padding: 40px;
     box-sizing: border-box;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
   }
   .pdf-measure {
     width: 794px;
@@ -100,9 +102,19 @@ const PDF_STYLES = `
   .export-document h2 { color: #0f172a; font-size: 16pt; margin: 24px 0 8px; break-inside: avoid; page-break-inside: avoid; }
   .export-document h3 { color: #334155; font-size: 13pt; margin: 18px 0 6px; break-inside: avoid; page-break-inside: avoid; }
   .export-document h4 { color: #475569; font-size: 12pt; margin: 14px 0 4px; break-inside: avoid; page-break-inside: avoid; }
-  .export-document p { margin: 0 0 10px; break-inside: avoid; page-break-inside: avoid; }
-  .export-document ul, .export-document ol { margin: 0 0 12px 20px; padding: 0; }
-  .export-document li { margin-bottom: 4px; break-inside: avoid; page-break-inside: avoid; }
+  .export-document p {
+    margin: 0 0 10px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    overflow-wrap: break-word;
+    max-width: 100%;
+  }
+  .export-document ul, .export-document ol { margin: 0 0 12px 20px; padding: 0; max-width: 100%; }
+  .export-document li {
+    margin-bottom: 4px;
+    overflow-wrap: break-word;
+    max-width: 100%;
+  }
   .export-document table {
     border-collapse: collapse;
     width: 100%;
@@ -117,16 +129,24 @@ const PDF_STYLES = `
     padding: 8px;
     text-align: left;
     vertical-align: top;
+    overflow-wrap: break-word;
+    word-break: normal;
   }
   .export-document th { background: #f1f5f9; font-weight: 600; }
-  .export-document code {
+  .export-document :not(pre) > code,
+  .export-document p code,
+  .export-document li code,
+  .export-document td code,
+  .export-document blockquote code {
     font-family: Consolas, monospace;
     font-size: 10pt;
     background: #f1f5f9;
     padding: 2px 4px;
     border-radius: 3px;
-    word-break: break-all;
-    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-wrap: break-word;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
   }
   .export-document pre {
     font-family: Consolas, monospace;
@@ -136,20 +156,27 @@ const PDF_STYLES = `
     padding: 12px;
     border-radius: 6px;
     white-space: pre-wrap;
-    word-break: break-all;
-    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-wrap: break-word;
     break-inside: avoid;
     page-break-inside: avoid;
     margin: 0 0 12px;
+    max-width: 100%;
   }
-  .export-document pre code { background: none; padding: 0; word-break: break-all; overflow-wrap: anywhere; }
+  .export-document pre code {
+    background: none;
+    padding: 0;
+    word-break: normal;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+  }
   .export-document blockquote {
     border-left: 4px solid #6366f1;
     margin: 12px 0;
     padding-left: 12px;
     color: #64748b;
-    break-inside: avoid;
-    page-break-inside: avoid;
+    overflow-wrap: break-word;
+    max-width: 100%;
   }
   .export-document hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; break-inside: avoid; page-break-inside: avoid; }
   .export-document strong { color: #0f172a; }
@@ -209,6 +236,16 @@ export function parseMarkdown(markdown) {
   return marked.parse(preprocessMarkdown(markdown));
 }
 
+/** Insert soft break points in inline code so PDF wraps at punctuation, not mid-identifier. */
+export function softenInlineCodeForPdf(rootEl) {
+  rootEl.querySelectorAll('code').forEach((codeEl) => {
+    if (codeEl.closest('pre')) return;
+
+    const text = codeEl.textContent;
+    codeEl.textContent = text.replace(/([_:/\\.-])/g, '$1\u200B');
+  });
+}
+
 export function buildDocxHtml(title, markdown) {
   const body = parseMarkdown(markdown);
   return `<!DOCTYPE html>
@@ -234,6 +271,7 @@ export function createPdfExportElement(title, markdown) {
   const contentEl = document.createElement('div');
   contentEl.className = 'export-document';
   contentEl.innerHTML = `<h1>${escapeHtml(title)}</h1>${parseMarkdown(markdown)}`;
+  softenInlineCodeForPdf(contentEl);
 
   host.appendChild(styleEl);
   host.appendChild(contentEl);
