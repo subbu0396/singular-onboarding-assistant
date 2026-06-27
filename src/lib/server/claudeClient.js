@@ -20,11 +20,34 @@ function getMigrationNote(form) {
   return ` They are migrating from ${form.currentMmp} to ${platform}.`;
 }
 
+function getDocSourceNote(form) {
+  return form._docUploaded === true
+    ? 'Note: Requirements were extracted from a client-provided document. Treat them as confirmed unless marked ambiguous.'
+    : 'Note: Requirements were entered manually by the integrations team.';
+}
+
 function buildRunbookPrompt(form) {
   const platform = getPlatform(form);
-  return `Generate an integration runbook for ${form.clientName}, a ${form.industry} company in ${form.primaryMarket}, onboarding to ${platform}.${getMigrationNote(form)}
+  return `Generate an Integration Runbook for the following client.
+${getDocSourceNote(form)}
 
-They are integrating via ${formatList(form.integrationMethods)} on ${formatList(form.platforms)} using ${form.backendLanguage}. Their data export goes to ${formatList(form.dataExportMethods)}. Event tracking: ${form.eventTrackingMethod}. Current/previous MMP: ${form.currentMmp}. Attribution model: ${form.attributionModel}. Auth method: ${form.authMethod}. Has data warehouse: ${form.hasDataWarehouse ? 'Yes' : 'No'}. Uses CDP: ${form.usesCdp ? `Yes (${form.cdpName})` : 'No'}. Timeline: ${form.onboardingUrgency} with go-live on ${form.targetGoLiveDate}.
+Client details:
+- Name: ${form.clientName}
+- Industry: ${form.industry}
+- Primary Market: ${form.primaryMarket}
+- Target MMP Platform: ${platform}
+- Platforms: ${formatList(form.platforms)}
+- Current MMP: ${form.currentMmp}
+- Attribution Model: ${form.attributionModel}
+- Integration Methods: ${formatList(form.integrationMethods)}
+- Data Export: ${formatList(form.dataExportMethods)}
+- Event Tracking: ${form.eventTrackingMethod}
+- Backend Language: ${form.backendLanguage}
+- Has Data Warehouse: ${form.hasDataWarehouse}
+- Uses CDP: ${form.usesCdp}${form.cdpName ? ` (${form.cdpName})` : ''}
+- Auth Method: ${form.authMethod}
+- Go-Live Date: ${form.targetGoLiveDate}
+- Urgency: ${form.onboardingUrgency}${getMigrationNote(form)}
 
 All steps, SDK references, dashboard URLs, and terminology must be specific to ${platform}. Do not reference other MMPs unless comparing during migration.
 
@@ -42,9 +65,24 @@ Use markdown formatting with clear headings. Be specific to their tech stack, in
 
 function buildFaqPrompt(form) {
   const platform = getPlatform(form);
-  return `Generate 12-15 FAQs for ${form.clientName}'s ${platform} onboarding. They are in ${form.industry}, using ${formatList(form.platforms)}, with ${formatList(form.integrationMethods)}. Data export via ${formatList(form.dataExportMethods)}. Event tracking: ${form.eventTrackingMethod}. Attribution model: ${form.attributionModel}. Auth: ${form.authMethod}.${getMigrationNote(form)}
+  return `Generate a FAQ Document for the following client.
+${getDocSourceNote(form)}
 
-Include questions a technical client team would realistically ask about ${platform} SDK setup, attribution logic, postback delays, data discrepancies, dashboard access, and ${formatList(form.dataExportMethods)} data delivery.
+Client details:
+- Name: ${form.clientName}
+- Industry: ${form.industry}
+- Primary Market: ${form.primaryMarket}
+- Target MMP Platform: ${platform}
+- Platforms: ${formatList(form.platforms)}
+- Current MMP: ${form.currentMmp}
+- Attribution Model: ${form.attributionModel}
+- Integration Methods: ${formatList(form.integrationMethods)}
+- Data Export: ${formatList(form.dataExportMethods)}
+- Event Tracking: ${form.eventTrackingMethod}
+- Backend Language: ${form.backendLanguage}
+- Auth Method: ${form.authMethod}${getMigrationNote(form)}
+
+Generate 12-15 questions a technical client team would realistically ask about ${platform} SDK setup, attribution logic, postback delays, data discrepancies, dashboard access, and ${formatList(form.dataExportMethods)} data delivery.
 
 Answer each FAQ concisely and accurately using ${platform}-specific terminology. Format as markdown with ### for each question and the answer below it.`;
 }
@@ -54,7 +92,16 @@ function buildChecklistPrompt(form) {
   const hasIos = form.platforms?.includes('iOS');
   const skadSection = hasIos ? '- SKAdNetwork Tests' : '';
 
-  return `Create a structured test checklist for ${form.clientName}'s ${platform} integration. Platforms: ${formatList(form.platforms)}. Integration: ${formatList(form.integrationMethods)}. Events: ${form.eventTrackingMethod}. Data export: ${formatList(form.dataExportMethods)}.${getMigrationNote(form)}
+  return `Generate a Test Checklist for the following client.
+${getDocSourceNote(form)}
+
+Client details:
+- Name: ${form.clientName}
+- Target MMP Platform: ${platform}
+- Platforms: ${formatList(form.platforms)}
+- Integration Methods: ${formatList(form.integrationMethods)}
+- Data Export: ${formatList(form.dataExportMethods)}
+- Event Tracking: ${form.eventTrackingMethod}${getMigrationNote(form)}
 
 All test steps must reference ${platform} SDK behavior, dashboards, and validation tools.
 
