@@ -121,3 +121,5 @@ export async function generateAllDocuments(form, apiKey) {
 
   return { runbook, faq, checklist };
 }
+
+export { buildRunbookPrompt, buildFaqPrompt, buildChecklistPrompt };
