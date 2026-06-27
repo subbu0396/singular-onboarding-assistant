@@ -1,4 +1,4 @@
-import { buildExportHtml, getFilename } from './documentHtml';
+import { buildExportFragment, getFilename } from './documentHtml';
 
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -9,16 +9,29 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function waitForLayout() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+}
+
 function createExportElement(title, markdown) {
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = buildExportHtml(title, markdown);
-  wrapper.style.position = 'fixed';
-  wrapper.style.left = '-9999px';
-  wrapper.style.top = '0';
-  wrapper.style.width = '800px';
-  wrapper.style.background = '#ffffff';
-  document.body.appendChild(wrapper);
-  return wrapper;
+  const host = document.createElement('div');
+  host.setAttribute('data-pdf-export', 'true');
+  host.innerHTML = buildExportFragment(title, markdown);
+
+  Object.assign(host.style, {
+    position: 'fixed',
+    left: '0',
+    top: '0',
+    width: '794px',
+    background: '#ffffff',
+    zIndex: '99999',
+    pointerEvents: 'none',
+  });
+
+  document.body.appendChild(host);
+  return host;
 }
 
 export function exportAsMarkdown(title, content) {
@@ -43,21 +56,51 @@ export async function exportAsDocx(title, content) {
 }
 
 export async function exportAsPdf(title, content) {
-  const html2pdf = (await import('html2pdf.js')).default;
   const element = createExportElement(title, content);
 
   try {
-    await html2pdf()
-      .set({
-        margin: [12, 12, 12, 12],
-        filename: getFilename(title, 'pdf'),
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
-      })
-      .from(element.querySelector('body') || element)
-      .save();
+    await waitForLayout();
+
+    const html2canvas = (await import('html2canvas')).default;
+    const { jsPDF } = await import('jspdf');
+
+    const canvas = await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+      width: 794,
+      windowWidth: 794,
+    });
+
+    if (canvas.width === 0 || canvas.height === 0) {
+      throw new Error('PDF render produced empty canvas');
+    }
+
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 10;
+    const printableWidth = pageWidth - margin * 2;
+    const printableHeight = pageHeight - margin * 2;
+    const imgWidth = printableWidth;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+    let heightLeft = imgHeight;
+    let yOffset = margin;
+
+    pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
+    heightLeft -= printableHeight;
+
+    while (heightLeft > 0) {
+      pdf.addPage();
+      yOffset = margin - (imgHeight - heightLeft);
+      pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
+      heightLeft -= printableHeight;
+    }
+
+    pdf.save(getFilename(title, 'pdf'));
   } finally {
     document.body.removeChild(element);
   }
