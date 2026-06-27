@@ -19,7 +19,7 @@ async function embed(text) {
     model: 'voyage-3-lite',
   });
 
-  return response.embeddings[0];
+  return response.data[0].embedding;
 }
 
 const patterns = [
@@ -119,7 +119,7 @@ async function seed() {
       console.log(`✓ ${pattern.title}`);
     }
 
-    await new Promise((r) => setTimeout(r, 350));
+    await new Promise((r) => setTimeout(r, 21000));
   }
 
   console.log('Seeding complete.');
