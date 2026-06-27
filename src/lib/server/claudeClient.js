@@ -1,14 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { formatList } from './formConfig';
+import { formatList } from '../formConfig';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 2000;
 
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not configured on the server');
-  }
+function getClient(apiKey) {
   return new Anthropic({ apiKey });
 }
 
@@ -94,13 +90,13 @@ const PROMPT_BUILDERS = {
   },
 };
 
-export async function generateDocument(docType, form) {
+export async function generateDocument(docType, form, apiKey) {
   const config = PROMPT_BUILDERS[docType];
   if (!config) {
     throw new Error(`Unknown document type: ${docType}`);
   }
 
-  const client = getClient();
+  const client = getClient(apiKey);
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
@@ -116,11 +112,11 @@ export async function generateDocument(docType, form) {
   return textBlock.text;
 }
 
-export async function generateAllDocuments(form) {
+export async function generateAllDocuments(form, apiKey) {
   const types = ['runbook', 'faq', 'checklist'];
   const results = await Promise.all(
     types.map(async (type) => {
-      const content = await generateDocument(type, form);
+      const content = await generateDocument(type, form, apiKey);
       return [type, content];
     })
   );
