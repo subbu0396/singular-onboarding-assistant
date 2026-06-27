@@ -1,5 +1,5 @@
 import HTMLtoDOCX from 'html-to-docx';
-import { buildExportHtml, getFilename } from '@/lib/documentHtml';
+import { buildDocxHtml, getFilename } from '@/lib/documentHtml';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -17,7 +17,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Only docx export is supported via this endpoint' });
     }
 
-    const html = buildExportHtml(title, content);
+    const html = buildDocxHtml(title, content);
     const buffer = await HTMLtoDOCX(html, null, {
       table: { row: { cantSplit: true } },
       footer: false,

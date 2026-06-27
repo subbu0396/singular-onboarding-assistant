@@ -1,4 +1,4 @@
-import { buildExportFragment } from './documentHtml';
+import { createPdfExportElement } from './documentHtml';
 import {
   buildCombinedMarkdown,
   getPackageFilename,
@@ -20,27 +20,49 @@ function waitForLayout() {
   });
 }
 
-function createExportElement(title, markdown) {
-  const host = document.createElement('div');
-  host.setAttribute('data-pdf-export', 'true');
-  host.innerHTML = buildExportFragment(title, markdown);
+function addCanvasPagesToPdf(pdf, canvas, margin, printableWidth, printableHeight) {
+  const scale = printableWidth / canvas.width;
+  const pageHeightPx = printableHeight / scale;
+  let sourceY = 0;
+  let pageIndex = 0;
 
-  Object.assign(host.style, {
-    position: 'fixed',
-    left: '0',
-    top: '0',
-    width: '794px',
-    background: '#ffffff',
-    zIndex: '99999',
-    pointerEvents: 'none',
-  });
+  while (sourceY < canvas.height) {
+    const sliceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
+    const pageCanvas = document.createElement('canvas');
+    pageCanvas.width = canvas.width;
+    pageCanvas.height = sliceHeight;
 
-  document.body.appendChild(host);
-  return host;
+    const ctx = pageCanvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+    ctx.drawImage(
+      canvas,
+      0,
+      sourceY,
+      canvas.width,
+      sliceHeight,
+      0,
+      0,
+      canvas.width,
+      sliceHeight
+    );
+
+    const imgData = pageCanvas.toDataURL('image/jpeg', 0.92);
+    const renderHeight = sliceHeight * scale;
+
+    if (pageIndex > 0) {
+      pdf.addPage();
+    }
+
+    pdf.addImage(imgData, 'JPEG', margin, margin, printableWidth, renderHeight);
+
+    sourceY += sliceHeight;
+    pageIndex += 1;
+  }
 }
 
 async function renderPdf(title, markdown, filename) {
-  const element = createExportElement(title, markdown);
+  const { host, contentEl } = createPdfExportElement(title, markdown);
 
   try {
     await waitForLayout();
@@ -48,7 +70,7 @@ async function renderPdf(title, markdown, filename) {
     const html2canvas = (await import('html2canvas')).default;
     const { jsPDF } = await import('jspdf');
 
-    const canvas = await html2canvas(element, {
+    const canvas = await html2canvas(contentEl, {
       scale: 2,
       useCORS: true,
       backgroundColor: '#ffffff',
@@ -62,31 +84,14 @@ async function renderPdf(title, markdown, filename) {
     }
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
     const margin = 10;
-    const printableWidth = pageWidth - margin * 2;
-    const printableHeight = pageHeight - margin * 2;
-    const imgWidth = printableWidth;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const printableWidth = pdf.internal.pageSize.getWidth() - margin * 2;
+    const printableHeight = pdf.internal.pageSize.getHeight() - margin * 2;
 
-    let heightLeft = imgHeight;
-    let yOffset = margin;
-
-    pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
-    heightLeft -= printableHeight;
-
-    while (heightLeft > 0) {
-      pdf.addPage();
-      yOffset = margin - (imgHeight - heightLeft);
-      pdf.addImage(imgData, 'JPEG', margin, yOffset, imgWidth, imgHeight);
-      heightLeft -= printableHeight;
-    }
-
+    addCanvasPagesToPdf(pdf, canvas, margin, printableWidth, printableHeight);
     pdf.save(filename);
   } finally {
-    document.body.removeChild(element);
+    document.body.removeChild(host);
   }
 }
 
