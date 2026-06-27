@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { formatList } from '../formConfig';
 
 const MODEL = 'claude-sonnet-4-6';
-const MAX_TOKENS = 2000;
+const MAX_TOKENS = 3000;
 
 function getClient(apiKey) {
   return new Anthropic({ apiKey });
@@ -113,12 +113,11 @@ export async function generateDocument(docType, form, apiKey) {
 }
 
 export async function generateAllDocuments(form, apiKey) {
-  const types = ['runbook', 'faq', 'checklist'];
-  const results = await Promise.all(
-    types.map(async (type) => {
-      const content = await generateDocument(type, form, apiKey);
-      return [type, content];
-    })
-  );
-  return Object.fromEntries(results);
+  const [runbook, faq, checklist] = await Promise.all([
+    generateDocument('runbook', form, apiKey),
+    generateDocument('faq', form, apiKey),
+    generateDocument('checklist', form, apiKey),
+  ]);
+
+  return { runbook, faq, checklist };
 }
