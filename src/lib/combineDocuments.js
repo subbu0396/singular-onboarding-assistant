@@ -2,16 +2,21 @@ import { DOC_TYPES, DOC_LABELS } from './formConfig';
 
 export const DOC_ORDER = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
 
-export function getPackageTitle(clientName) {
-  return `Singular Onboarding Package — ${clientName?.trim() || 'Client'}`;
+export function getPackageTitle(clientName, targetMmp) {
+  const platform = targetMmp?.trim() || 'MMP';
+  return `${platform} Onboarding Package — ${clientName?.trim() || 'Client'}`;
 }
 
-export function getPackageFilename(clientName, extension) {
-  const slug = (clientName?.trim() || 'client')
+export function getPackageFilename(clientName, targetMmp, extension) {
+  const platformSlug = (targetMmp?.trim() || 'mmp')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
-  return `singular-onboarding-${slug}.${extension}`;
+  const clientSlug = (clientName?.trim() || 'client')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  return `${platformSlug}-onboarding-${clientSlug}.${extension}`;
 }
 
 export function buildCombinedMarkdown(documents) {

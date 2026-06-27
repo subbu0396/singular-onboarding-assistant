@@ -11,6 +11,7 @@ export default function ResultsTabs({
   errors,
   loadingDocs,
   clientName,
+  targetMmp,
   onRegenerate,
   onRetry,
   onStartOver,
@@ -26,7 +27,7 @@ export default function ResultsTabs({
     setExportError(null);
     setIsExporting(true);
     try {
-      await exportCombinedPackage(documents, clientName, downloadFormat);
+      await exportCombinedPackage(documents, clientName, targetMmp, downloadFormat);
     } catch {
       setExportError('Export failed. Please try again or choose a different format.');
     } finally {
@@ -40,7 +41,8 @@ export default function ResultsTabs({
         <div>
           <h2 className="text-2xl font-bold text-white">Generated Documents</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Review each document below, then download all three as a single package.
+            {targetMmp ? `${targetMmp} onboarding docs` : 'Onboarding docs'} for{' '}
+            {clientName || 'your client'} — review each tab, then download the full package.
           </p>
         </div>
         <button type="button" onClick={onStartOver} className="btn-secondary shrink-0">

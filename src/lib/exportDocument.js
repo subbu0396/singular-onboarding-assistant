@@ -90,8 +90,8 @@ async function renderPdf(title, markdown, filename) {
   }
 }
 
-export async function exportCombinedPackage(documents, clientName, format) {
-  const title = getPackageTitle(clientName);
+export async function exportCombinedPackage(documents, clientName, targetMmp, format) {
+  const title = getPackageTitle(clientName, targetMmp);
   const markdown = buildCombinedMarkdown(documents);
 
   switch (format) {
@@ -99,7 +99,7 @@ export async function exportCombinedPackage(documents, clientName, format) {
       const combined = `# ${title}\n\n${markdown}`;
       triggerDownload(
         new Blob([combined], { type: 'text/markdown' }),
-        getPackageFilename(clientName, 'md')
+        getPackageFilename(clientName, targetMmp, 'md')
       );
       break;
     }
@@ -107,7 +107,12 @@ export async function exportCombinedPackage(documents, clientName, format) {
       const response = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, content: markdown, format: 'docx', filename: getPackageFilename(clientName, 'docx') }),
+        body: JSON.stringify({
+          title,
+          content: markdown,
+          format: 'docx',
+          filename: getPackageFilename(clientName, targetMmp, 'docx'),
+        }),
       });
 
       if (!response.ok) {
@@ -116,11 +121,11 @@ export async function exportCombinedPackage(documents, clientName, format) {
       }
 
       const blob = await response.blob();
-      triggerDownload(blob, getPackageFilename(clientName, 'docx'));
+      triggerDownload(blob, getPackageFilename(clientName, targetMmp, 'docx'));
       break;
     }
     case 'pdf':
-      await renderPdf(title, markdown, getPackageFilename(clientName, 'pdf'));
+      await renderPdf(title, markdown, getPackageFilename(clientName, targetMmp, 'pdf'));
       break;
     default:
       throw new Error(`Unsupported format: ${format}`);

@@ -32,14 +32,32 @@ export const PLATFORMS = [
   'Unity',
 ];
 
-export const CURRENT_MMP_OPTIONS = [
-  'None',
+export const TARGET_MMP_PLATFORMS = [
+  'Singular',
   'AppsFlyer',
   'Adjust',
   'Branch',
-  'Firebase',
+  'Kochava',
+  'Tenjin',
+  'Airbridge',
+  'AppMetrica',
+  'Firebase / Google Analytics',
+  'CleverTap',
+  'Amplitude',
+  'TikTok Measurement',
+  'Meta Attribution',
+  'GameAnalytics',
+  'BytePlus (AppLog)',
+  'MyTracker',
+  'Rockerbox',
+  'mParticle',
+  'Adobe Analytics',
+  'Netcore Smartech',
+  'Flurry Analytics',
   'Other',
 ];
+
+export const CURRENT_MMP_OPTIONS = ['None', ...TARGET_MMP_PLATFORMS.filter((p) => p !== 'Other')];
 
 export const ATTRIBUTION_MODELS = [
   'Last Touch',
@@ -107,6 +125,7 @@ export const DOC_LABELS = {
 
 export const INITIAL_FORM_STATE = {
   clientName: '',
+  targetMmp: '',
   industry: '',
   primaryMarket: '',
   platforms: [],
@@ -133,6 +152,7 @@ export function validateForm(form) {
   const errors = [];
 
   if (!form.clientName?.trim()) errors.push('Client Name is required');
+  if (!form.targetMmp) errors.push('Target MMP Platform is required');
   if (!form.industry) errors.push('Industry is required');
   if (!form.primaryMarket) errors.push('Primary Market is required');
   if (!form.platforms?.length) errors.push('At least one platform is required');

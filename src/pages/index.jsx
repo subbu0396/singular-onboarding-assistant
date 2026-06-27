@@ -131,8 +131,8 @@ export default function Home() {
             <span className="text-sm font-bold text-white">S</span>
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-white">Singular Onboarding Assistant</h1>
-            <p className="text-xs text-slate-500">AI-powered integration document generator</p>
+            <h1 className="text-lg font-semibold text-white">MMP Onboarding Assistant</h1>
+            <p className="text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
           </div>
         </div>
       </header>
@@ -145,7 +145,7 @@ export default function Home() {
                 Client Tech Stack Input
               </h2>
               <p className="mt-2 text-sm text-slate-400">
-                Enter the client&apos;s integration details to generate tailored onboarding documents.
+                Enter the client&apos;s integration details and select your MMP platform to generate tailored onboarding documents.
               </p>
             </div>
             <Form onSubmit={generateAll} isLoading={isGenerating} />
@@ -160,6 +160,7 @@ export default function Home() {
             errors={errors}
             loadingDocs={loadingDocs}
             clientName={formData?.clientName}
+            targetMmp={formData?.targetMmp}
             onRegenerate={regenerateDoc}
             onRetry={retryDoc}
             onStartOver={handleStartOver}
@@ -168,7 +169,7 @@ export default function Home() {
       </main>
 
       <footer className="border-t border-slate-800 py-6 text-center text-xs text-slate-600">
-        Singular Onboarding Assistant · Internal use only
+        MMP Onboarding Assistant · Internal use only
       </footer>
     </div>
   );

@@ -12,8 +12,25 @@ function getClient() {
   return new Anthropic({ apiKey });
 }
 
+function getPlatform(form) {
+  return form.targetMmp || 'Mobile Measurement Platform';
+}
+
+function getMigrationNote(form) {
+  const platform = getPlatform(form);
+  if (!form.currentMmp || form.currentMmp === 'None' || form.currentMmp === platform) {
+    return '';
+  }
+  return ` They are migrating from ${form.currentMmp} to ${platform}.`;
+}
+
 function buildRunbookPrompt(form) {
-  return `Generate an integration runbook for ${form.clientName}, a ${form.industry} company in ${form.primaryMarket}. They are integrating via ${formatList(form.integrationMethods)} on ${formatList(form.platforms)} using ${form.backendLanguage}. Their data export goes to ${formatList(form.dataExportMethods)}. Event tracking: ${form.eventTrackingMethod}. Current MMP: ${form.currentMmp}. Attribution model: ${form.attributionModel}. Auth method: ${form.authMethod}. Has data warehouse: ${form.hasDataWarehouse ? 'Yes' : 'No'}. Uses CDP: ${form.usesCdp ? `Yes (${form.cdpName})` : 'No'}. Timeline: ${form.onboardingUrgency} with go-live on ${form.targetGoLiveDate}.
+  const platform = getPlatform(form);
+  return `Generate an integration runbook for ${form.clientName}, a ${form.industry} company in ${form.primaryMarket}, onboarding to ${platform}.${getMigrationNote(form)}
+
+They are integrating via ${formatList(form.integrationMethods)} on ${formatList(form.platforms)} using ${form.backendLanguage}. Their data export goes to ${formatList(form.dataExportMethods)}. Event tracking: ${form.eventTrackingMethod}. Current/previous MMP: ${form.currentMmp}. Attribution model: ${form.attributionModel}. Auth method: ${form.authMethod}. Has data warehouse: ${form.hasDataWarehouse ? 'Yes' : 'No'}. Uses CDP: ${form.usesCdp ? `Yes (${form.cdpName})` : 'No'}. Timeline: ${form.onboardingUrgency} with go-live on ${form.targetGoLiveDate}.
+
+All steps, SDK references, dashboard URLs, and terminology must be specific to ${platform}. Do not reference other MMPs unless comparing during migration.
 
 Structure the runbook with these sections:
 1. Pre-Integration Checklist
@@ -24,24 +41,26 @@ Structure the runbook with these sections:
 6. QA & Validation Steps
 7. Go-Live Sign-off Criteria
 
-Use markdown formatting with clear headings. Be specific to their tech stack and industry.`;
+Use markdown formatting with clear headings. Be specific to their tech stack, industry, and ${platform}.`;
 }
 
 function buildFaqPrompt(form) {
-  return `Generate 12-15 FAQs for ${form.clientName}'s Singular onboarding. They are in ${form.industry}, using ${formatList(form.platforms)}, with ${formatList(form.integrationMethods)}. Data export via ${formatList(form.dataExportMethods)}. Event tracking: ${form.eventTrackingMethod}. Attribution model: ${form.attributionModel}. Auth: ${form.authMethod}.
+  const platform = getPlatform(form);
+  return `Generate 12-15 FAQs for ${form.clientName}'s ${platform} onboarding. They are in ${form.industry}, using ${formatList(form.platforms)}, with ${formatList(form.integrationMethods)}. Data export via ${formatList(form.dataExportMethods)}. Event tracking: ${form.eventTrackingMethod}. Attribution model: ${form.attributionModel}. Auth: ${form.authMethod}.${getMigrationNote(form)}
 
-Include questions a technical client team would realistically ask about SDK setup, attribution logic, postback delays, data discrepancies, dashboard access, and ${formatList(form.dataExportMethods)} data delivery.
+Include questions a technical client team would realistically ask about ${platform} SDK setup, attribution logic, postback delays, data discrepancies, dashboard access, and ${formatList(form.dataExportMethods)} data delivery.
 
-Answer each FAQ concisely and accurately. Format as markdown with ### for each question and the answer below it.`;
+Answer each FAQ concisely and accurately using ${platform}-specific terminology. Format as markdown with ### for each question and the answer below it.`;
 }
 
 function buildChecklistPrompt(form) {
+  const platform = getPlatform(form);
   const hasIos = form.platforms?.includes('iOS');
-  const skadSection = hasIos
-    ? '- SKAdNetwork Tests'
-    : '';
+  const skadSection = hasIos ? '- SKAdNetwork Tests' : '';
 
-  return `Create a structured test checklist for ${form.clientName}'s Singular integration. Platforms: ${formatList(form.platforms)}. Integration: ${formatList(form.integrationMethods)}. Events: ${form.eventTrackingMethod}. Data export: ${formatList(form.dataExportMethods)}.
+  return `Create a structured test checklist for ${form.clientName}'s ${platform} integration. Platforms: ${formatList(form.platforms)}. Integration: ${formatList(form.integrationMethods)}. Events: ${form.eventTrackingMethod}. Data export: ${formatList(form.dataExportMethods)}.${getMigrationNote(form)}
+
+All test steps must reference ${platform} SDK behavior, dashboards, and validation tools.
 
 Format as a checklist with these sections:
 - SDK Initialization Tests
@@ -55,17 +74,22 @@ ${skadSection}
 Each item should have: [ ] checkbox, test description, expected result, pass criteria. Use markdown formatting.`;
 }
 
+function buildSystemPrompt(form, role) {
+  const platform = getPlatform(form);
+  return `${role} You are creating client-facing onboarding documentation for ${platform}, a mobile measurement and attribution platform. Use ${platform}-specific SDK names, features, dashboard terminology, and integration patterns throughout.`;
+}
+
 const PROMPT_BUILDERS = {
   runbook: {
-    system: 'You are a senior integrations engineer at a mobile attribution platform. Generate a detailed, client-ready integration runbook.',
+    system: (form) => buildSystemPrompt(form, 'You are a senior integrations engineer.'),
     buildUser: buildRunbookPrompt,
   },
   faq: {
-    system: 'You are a technical account manager creating client-facing onboarding FAQs.',
+    system: (form) => buildSystemPrompt(form, 'You are a technical account manager creating onboarding FAQs.'),
     buildUser: buildFaqPrompt,
   },
   checklist: {
-    system: 'You are a QA engineer specializing in mobile attribution testing.',
+    system: (form) => buildSystemPrompt(form, 'You are a QA engineer specializing in mobile attribution testing.'),
     buildUser: buildChecklistPrompt,
   },
 };
@@ -80,7 +104,7 @@ export async function generateDocument(docType, form) {
   const response = await client.messages.create({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    system: config.system,
+    system: config.system(form),
     messages: [{ role: 'user', content: config.buildUser(form) }],
   });
 

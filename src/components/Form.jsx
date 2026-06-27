@@ -12,6 +12,7 @@ import {
   BACKEND_LANGUAGES,
   AUTH_METHODS,
   URGENCY_OPTIONS,
+  TARGET_MMP_PLATFORMS,
   INITIAL_FORM_STATE,
   validateForm,
 } from '@/lib/formConfig';
@@ -124,6 +125,16 @@ export default function Form({ onSubmit, isLoading }) {
               />
             </div>
             <SelectField
+              label="Target MMP Platform"
+              value={form.targetMmp}
+              onChange={(v) => update('targetMmp', v)}
+              options={TARGET_MMP_PLATFORMS}
+              placeholder="Select attribution platform..."
+            />
+            <p className="text-xs text-slate-500">
+              Documents will be generated for the selected mobile measurement platform.
+            </p>
+            <SelectField
               label="Industry"
               value={form.industry}
               onChange={(v) => update('industry', v)}
@@ -148,10 +159,11 @@ export default function Form({ onSubmit, isLoading }) {
               onChange={(v) => update('platforms', v)}
             />
             <SelectField
-              label="Current MMP"
+              label="Current / Previous MMP"
               value={form.currentMmp}
               onChange={(v) => update('currentMmp', v)}
               options={CURRENT_MMP_OPTIONS}
+              placeholder="Select if migrating..."
             />
             <SelectField
               label="Attribution Model Preference"
