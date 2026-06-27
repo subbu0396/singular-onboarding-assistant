@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { DOC_TYPES, DOC_LABELS } from '@/lib/formConfig';
+import { hasAllDocuments } from '@/lib/combineDocuments';
+import { DOWNLOAD_FORMATS, exportCombinedPackage } from '@/lib/exportDocument';
 import DocCard from './DocCard';
 
 const TAB_ORDER = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -8,24 +10,87 @@ export default function ResultsTabs({
   documents,
   errors,
   loadingDocs,
+  clientName,
   onRegenerate,
   onRetry,
   onStartOver,
 }) {
   const [activeTab, setActiveTab] = useState(DOC_TYPES.RUNBOOK);
+  const [downloadFormat, setDownloadFormat] = useState('pdf');
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState(null);
+
+  const canDownloadAll = hasAllDocuments(documents, loadingDocs);
+
+  const handleDownloadAll = async () => {
+    setExportError(null);
+    setIsExporting(true);
+    try {
+      await exportCombinedPackage(documents, clientName, downloadFormat);
+    } catch {
+      setExportError('Export failed. Please try again or choose a different format.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-white">Generated Documents</h2>
           <p className="mt-1 text-sm text-slate-400">
-            Review, copy, or download your tailored onboarding materials.
+            Review each document below, then download all three as a single package.
           </p>
         </div>
         <button type="button" onClick={onStartOver} className="btn-secondary shrink-0">
           Start Over
         </button>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-white">Download Complete Package</p>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Integration Runbook, FAQ Document, and Test Checklist in one file
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={downloadFormat}
+              onChange={(e) => {
+                setDownloadFormat(e.target.value);
+                setExportError(null);
+              }}
+              disabled={!canDownloadAll || isExporting}
+              className="rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-xs text-slate-200 focus:border-indigo-accent focus:outline-none focus:ring-1 focus:ring-indigo-accent disabled:opacity-40"
+              aria-label="Download format"
+            >
+              {DOWNLOAD_FORMATS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleDownloadAll}
+              disabled={!canDownloadAll || isExporting}
+              className="btn-primary text-xs disabled:opacity-40"
+            >
+              {isExporting ? 'Exporting...' : 'Download All'}
+            </button>
+          </div>
+        </div>
+        {!canDownloadAll && (
+          <p className="mt-3 text-xs text-slate-500">
+            All three documents must finish generating before you can download the package.
+          </p>
+        )}
+        {exportError && (
+          <p className="mt-3 text-xs text-red-300">{exportError}</p>
+        )}
       </div>
 
       {/* Tab bar */}

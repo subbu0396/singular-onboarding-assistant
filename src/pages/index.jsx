@@ -159,6 +159,7 @@ export default function Home() {
             documents={documents}
             errors={errors}
             loadingDocs={loadingDocs}
+            clientName={formData?.clientName}
             onRegenerate={regenerateDoc}
             onRetry={retryDoc}
             onStartOver={handleStartOver}

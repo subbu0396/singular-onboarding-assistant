@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { DOWNLOAD_FORMATS, exportDocument } from '@/lib/exportDocument';
 
 function getWordCount(text) {
   if (!text) return 0;
@@ -23,9 +22,6 @@ export default function DocCard({
   onRetry,
 }) {
   const [copied, setCopied] = useState(false);
-  const [downloadFormat, setDownloadFormat] = useState('pdf');
-  const [isExporting, setIsExporting] = useState(false);
-  const [exportError, setExportError] = useState(null);
   const wordCount = getWordCount(content);
   const readingTime = getReadingTime(wordCount);
 
@@ -36,18 +32,6 @@ export default function DocCard({
       setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
-    }
-  };
-
-  const handleDownload = async () => {
-    setExportError(null);
-    setIsExporting(true);
-    try {
-      await exportDocument(title, content, downloadFormat);
-    } catch {
-      setExportError('Export failed. Please try again or choose a different format.');
-    } finally {
-      setIsExporting(false);
     }
   };
 
@@ -83,32 +67,6 @@ export default function DocCard({
           >
             {copied ? 'Copied!' : 'Copy to Clipboard'}
           </button>
-          <div className="flex items-center gap-1.5">
-            <select
-              value={downloadFormat}
-              onChange={(e) => {
-                setDownloadFormat(e.target.value);
-                setExportError(null);
-              }}
-              disabled={!content || isLoading || isExporting}
-              className="rounded-lg border border-slate-600 bg-slate-800 px-2 py-2 text-xs text-slate-200 focus:border-indigo-accent focus:outline-none focus:ring-1 focus:ring-indigo-accent disabled:opacity-40"
-              aria-label="Download format"
-            >
-              {DOWNLOAD_FORMATS.map(({ value, label }) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={!content || isLoading || isExporting}
-              className="btn-secondary text-xs disabled:opacity-40"
-            >
-              {isExporting ? 'Exporting...' : 'Download'}
-            </button>
-          </div>
           <button
             type="button"
             onClick={() => onRegenerate(docType)}
@@ -119,12 +77,6 @@ export default function DocCard({
           </button>
         </div>
       </div>
-
-      {exportError && (
-        <div className="mx-6 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-300">
-          {exportError}
-        </div>
-      )}
 
       <div className="px-6 py-5">
         {isLoading ? (

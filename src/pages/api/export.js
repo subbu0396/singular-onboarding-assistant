@@ -7,7 +7,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { title, content, format } = req.body;
+    const { title, content, format, filename } = req.body;
 
     if (!title || !content) {
       return res.status(400).json({ error: 'Title and content are required' });
@@ -24,9 +24,9 @@ export default async function handler(req, res) {
       pageNumber: false,
     });
 
-    const filename = getFilename(title, 'docx');
+    const downloadName = filename || getFilename(title, 'docx');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${downloadName}"`);
     return res.status(200).send(Buffer.from(buffer));
   } catch (error) {
     console.error('Export error:', error);

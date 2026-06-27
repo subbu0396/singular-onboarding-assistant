@@ -1,4 +1,9 @@
-import { buildExportFragment, getFilename } from './documentHtml';
+import { buildExportFragment } from './documentHtml';
+import {
+  buildCombinedMarkdown,
+  getPackageFilename,
+  getPackageTitle,
+} from './combineDocuments';
 
 function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -34,29 +39,8 @@ function createExportElement(title, markdown) {
   return host;
 }
 
-export function exportAsMarkdown(title, content) {
-  const blob = new Blob([content], { type: 'text/markdown' });
-  triggerDownload(blob, getFilename(title, 'md'));
-}
-
-export async function exportAsDocx(title, content) {
-  const response = await fetch('/api/export', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ title, content, format: 'docx' }),
-  });
-
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || 'DOCX export failed');
-  }
-
-  const blob = await response.blob();
-  triggerDownload(blob, getFilename(title, 'docx'));
-}
-
-export async function exportAsPdf(title, content) {
-  const element = createExportElement(title, content);
+async function renderPdf(title, markdown, filename) {
+  const element = createExportElement(title, markdown);
 
   try {
     await waitForLayout();
@@ -100,22 +84,43 @@ export async function exportAsPdf(title, content) {
       heightLeft -= printableHeight;
     }
 
-    pdf.save(getFilename(title, 'pdf'));
+    pdf.save(filename);
   } finally {
     document.body.removeChild(element);
   }
 }
 
-export async function exportDocument(title, content, format) {
+export async function exportCombinedPackage(documents, clientName, format) {
+  const title = getPackageTitle(clientName);
+  const markdown = buildCombinedMarkdown(documents);
+
   switch (format) {
-    case 'md':
-      exportAsMarkdown(title, content);
+    case 'md': {
+      const combined = `# ${title}\n\n${markdown}`;
+      triggerDownload(
+        new Blob([combined], { type: 'text/markdown' }),
+        getPackageFilename(clientName, 'md')
+      );
       break;
-    case 'docx':
-      await exportAsDocx(title, content);
+    }
+    case 'docx': {
+      const response = await fetch('/api/export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content: markdown, format: 'docx', filename: getPackageFilename(clientName, 'docx') }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'DOCX export failed');
+      }
+
+      const blob = await response.blob();
+      triggerDownload(blob, getPackageFilename(clientName, 'docx'));
       break;
+    }
     case 'pdf':
-      await exportAsPdf(title, content);
+      await renderPdf(title, markdown, getPackageFilename(clientName, 'pdf'));
       break;
     default:
       throw new Error(`Unsupported format: ${format}`);
