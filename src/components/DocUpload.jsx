@@ -28,12 +28,17 @@ export default function DocUpload({ onExtracted, onDismiss }) {
     setIsExtracting(true);
 
     try {
-      const documentText = await readUploadedFile(file);
+      const parsed = await readUploadedFile(file);
+
+      const payload =
+        parsed.kind === 'base64'
+          ? { documentBase64: parsed.base64, documentMediaType: parsed.mediaType }
+          : { documentText: parsed.text };
 
       const res = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documentText }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -99,11 +104,11 @@ export default function DocUpload({ onExtracted, onDismiss }) {
           <p className="mb-3 text-xs text-slate-400">
             SOW, RFP, onboarding email, or technical spec
           </p>
-          <p className="text-xs text-slate-500">.txt · .md · .pdf · .doc · .docx · .eml — max 5MB</p>
+          <p className="text-xs text-slate-500">.txt · .md · .pdf · .html · .csv · .eml — max 5MB</p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".txt,.md,.pdf,.doc,.docx,.eml,.html"
+            accept=".txt,.md,.pdf,.eml,.html,.htm,.csv"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

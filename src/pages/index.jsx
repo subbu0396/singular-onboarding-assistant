@@ -3,107 +3,129 @@ import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
 import { DOC_TYPES } from '@/lib/formConfig';
 
-const EMPTY_DOCS = {
-  [DOC_TYPES.RUNBOOK]: '',
-  [DOC_TYPES.FAQ]: '',
-  [DOC_TYPES.CHECKLIST]: '',
-};
+const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
 
-const EMPTY_ERRORS = {
-  [DOC_TYPES.RUNBOOK]: null,
-  [DOC_TYPES.FAQ]: null,
-  [DOC_TYPES.CHECKLIST]: null,
-};
+const EMPTY_DOCS = Object.fromEntries(DOC_KEYS.map((k) => [k, '']));
+const EMPTY_ERRORS = Object.fromEntries(DOC_KEYS.map((k) => [k, null]));
+const ALL_LOADING = Object.fromEntries(DOC_KEYS.map((k) => [k, true]));
+const NONE_LOADING = Object.fromEntries(DOC_KEYS.map((k) => [k, false]));
 
-const EMPTY_LOADING = {
-  [DOC_TYPES.RUNBOOK]: false,
-  [DOC_TYPES.FAQ]: false,
-  [DOC_TYPES.CHECKLIST]: false,
-};
+const SUFFIXES = ['_delta', '_complete', '_error'];
+
+function parseDocEvent(eventType) {
+  for (const suffix of SUFFIXES) {
+    if (eventType.endsWith(suffix)) {
+      return { docType: eventType.slice(0, -suffix.length), kind: suffix.slice(1) };
+    }
+  }
+  return null;
+}
+
+async function consumeSSE(res, onEvent) {
+  if (!res.ok) {
+    let message = `Request failed (${res.status})`;
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch {
+      // body wasn't JSON; keep generic message
+    }
+    throw new Error(message);
+  }
+  if (!res.body) throw new Error('No response stream received');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ')) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed.slice(6));
+      } catch (parseErr) {
+        console.warn('SSE parse error:', parseErr);
+        continue;
+      }
+      onEvent(parsed);
+    }
+  }
+}
 
 export default function Home() {
   const [view, setView] = useState('form');
   const [formData, setFormData] = useState(null);
   const [documents, setDocuments] = useState(EMPTY_DOCS);
   const [errors, setErrors] = useState(EMPTY_ERRORS);
-  const [loadingDocs, setLoadingDocs] = useState(EMPTY_LOADING);
+  const [loadingDocs, setLoadingDocs] = useState(NONE_LOADING);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState('');
   const [error, setError] = useState(null);
 
-  const generateAll = useCallback(async (form) => {
-    setIsLoading(true);
-    setError(null);
-    setFormData(form);
-    setDocuments(EMPTY_DOCS);
-    setErrors(EMPTY_ERRORS);
-    setView('results');
+  const handleDocEvent = useCallback((event) => {
+    const parsed = parseDocEvent(event.type);
+    if (!parsed) return false;
+    const { docType, kind } = parsed;
 
-    try {
-      setLoadingStep('Analyzing tech stack...');
-
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      });
-
-      if (!res.ok) throw new Error(`Request failed (${res.status})`);
-      if (!res.body) throw new Error('No response stream received');
-
-      setLoadingStep('Generating documents...');
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data: ')) continue;
-
-          let parsed;
-          try {
-            parsed = JSON.parse(trimmed.slice(6));
-          } catch (parseErr) {
-            console.warn('SSE parse error:', parseErr);
-            continue;
-          }
-
-          if (parsed.type === 'runbook') {
-            setDocuments((prev) => ({ ...prev, runbook: parsed.content }));
-            setLoadingStep('Runbook ready — generating FAQ and checklist...');
-          }
-          if (parsed.type === 'faq') {
-            setDocuments((prev) => ({ ...prev, faq: parsed.content }));
-            setLoadingStep('FAQ ready — generating checklist...');
-          }
-          if (parsed.type === 'checklist') {
-            setDocuments((prev) => ({ ...prev, checklist: parsed.content }));
-            setLoadingStep('All documents ready...');
-          }
-          if (parsed.type === 'done') {
-            setLoadingStep('');
-          }
-          if (parsed.type === 'error') {
-            throw new Error(parsed.message);
-          }
-        }
-      }
-    } catch (err) {
-      setError(err.message || 'Something went wrong. Please try again.');
-    } finally {
-      setIsLoading(false);
-      setLoadingStep('');
+    if (kind === 'delta') {
+      setDocuments((prev) => ({
+        ...prev,
+        [docType]: (prev[docType] || '') + event.delta,
+      }));
+    } else if (kind === 'complete') {
+      setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
+    } else if (kind === 'error') {
+      setErrors((prev) => ({ ...prev, [docType]: event.message || 'Generation failed' }));
+      setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
     }
+    return true;
   }, []);
+
+  const generateAll = useCallback(
+    async (form) => {
+      setIsLoading(true);
+      setError(null);
+      setFormData(form);
+      setDocuments(EMPTY_DOCS);
+      setErrors(EMPTY_ERRORS);
+      setLoadingDocs(ALL_LOADING);
+      setLoadingStep('Generating documents...');
+      setView('results');
+
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(form),
+        });
+
+        await consumeSSE(res, (event) => {
+          if (handleDocEvent(event)) return;
+          if (event.type === 'done') {
+            setLoadingStep('');
+          } else if (event.type === 'error') {
+            setError(event.message || 'Generation failed');
+          }
+        });
+      } catch (err) {
+        setError(err.message || 'Something went wrong. Please try again.');
+        setLoadingDocs(NONE_LOADING);
+      } finally {
+        setIsLoading(false);
+        setLoadingStep('');
+      }
+    },
+    [handleDocEvent]
+  );
 
   const regenerateDoc = useCallback(
     async (docType) => {
@@ -111,6 +133,7 @@ export default function Home() {
 
       setLoadingDocs((prev) => ({ ...prev, [docType]: true }));
       setErrors((prev) => ({ ...prev, [docType]: null }));
+      setDocuments((prev) => ({ ...prev, [docType]: '' }));
 
       try {
         const res = await fetch('/api/generate', {
@@ -119,38 +142,34 @@ export default function Home() {
           body: JSON.stringify({ form: formData, docType }),
         });
 
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || `Request failed (${res.status})`);
-        }
-
-        const data = await res.json();
-        setDocuments((prev) => ({ ...prev, [docType]: data.content }));
+        await consumeSSE(res, (event) => {
+          if (handleDocEvent(event)) return;
+          if (event.type === 'error') {
+            setErrors((prev) => ({
+              ...prev,
+              [docType]: event.message || 'Failed to regenerate document',
+            }));
+          }
+        });
       } catch (err) {
         setErrors((prev) => ({
           ...prev,
           [docType]: err.message || 'Failed to regenerate document',
         }));
-      } finally {
         setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
       }
     },
-    [formData]
+    [formData, handleDocEvent]
   );
 
-  const retryDoc = useCallback(
-    (docType) => {
-      regenerateDoc(docType);
-    },
-    [regenerateDoc]
-  );
+  const retryDoc = useCallback((docType) => regenerateDoc(docType), [regenerateDoc]);
 
   const handleStartOver = () => {
     setView('form');
     setFormData(null);
     setDocuments(EMPTY_DOCS);
     setErrors(EMPTY_ERRORS);
-    setLoadingDocs(EMPTY_LOADING);
+    setLoadingDocs(NONE_LOADING);
     setError(null);
     setLoadingStep('');
     setIsLoading(false);

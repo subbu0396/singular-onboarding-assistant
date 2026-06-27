@@ -1,34 +1,50 @@
-export async function readUploadedFile(file) {
-  const maxSizeBytes = 5 * 1024 * 1024;
+const MAX_SIZE_BYTES = 5 * 1024 * 1024;
 
-  if (file.size > maxSizeBytes) {
+const TEXT_EXTS = ['txt', 'md', 'html', 'htm', 'csv', 'eml'];
+const PDF_EXTS = ['pdf'];
+const UNSUPPORTED_BINARY_EXTS = ['doc', 'docx'];
+
+async function fileToBase64(file) {
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(
+      null,
+      bytes.subarray(i, i + chunkSize)
+    );
+  }
+  return btoa(binary);
+}
+
+export async function readUploadedFile(file) {
+  if (file.size > MAX_SIZE_BYTES) {
     throw new Error('File is too large. Maximum size is 5MB.');
   }
 
   const ext = file.name.split('.').pop().toLowerCase();
-  const supportedExts = ['txt', 'md', 'pdf', 'doc', 'docx', 'eml', 'html', 'htm', 'csv'];
 
-  if (!supportedExts.includes(ext)) {
+  if (TEXT_EXTS.includes(ext)) {
+    const text = await file.text();
+    if (text.trim().length < 50) {
+      throw new Error('Document is too short or empty.');
+    }
+    return { kind: 'text', text };
+  }
+
+  if (PDF_EXTS.includes(ext)) {
+    const base64 = await fileToBase64(file);
+    return { kind: 'base64', base64, mediaType: 'application/pdf' };
+  }
+
+  if (UNSUPPORTED_BINARY_EXTS.includes(ext)) {
     throw new Error(
-      `Unsupported file type .${ext}. Upload a .txt, .md, .pdf, .doc, .docx, or .eml file.`
+      `${ext.toUpperCase()} files are not supported directly. Please save the document as PDF and re-upload.`
     );
   }
 
-  if (['txt', 'md', 'html', 'htm', 'csv', 'eml'].includes(ext)) {
-    return await file.text();
-  }
-
-  if (['pdf', 'doc', 'docx'].includes(ext)) {
-    try {
-      const text = await file.text();
-      if (text.trim().length > 100) return text;
-      throw new Error(
-        'Could not extract text from this file. If it is a scanned PDF, please copy-paste the text instead.'
-      );
-    } catch {
-      throw new Error('Could not read this file. Try saving it as .txt and uploading again.');
-    }
-  }
-
-  throw new Error('Unsupported file format.');
+  throw new Error(
+    `Unsupported file type .${ext}. Upload a .txt, .md, .pdf, .html, .csv, or .eml file.`
+  );
 }
