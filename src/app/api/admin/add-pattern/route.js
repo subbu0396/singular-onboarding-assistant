@@ -1,5 +1,7 @@
 export const runtime = 'edge';
 
+import { embedText } from '@/lib/embeddings';
+
 export async function POST(req) {
   const adminToken = process.env.ADMIN_TOKEN;
   const authHeader = req.headers.get('authorization');
@@ -17,14 +19,11 @@ export async function POST(req) {
     );
   }
 
-  const OpenAI = (await import('openai')).default;
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  if (!process.env.VOYAGE_API_KEY) {
+    return Response.json({ error: 'VOYAGE_API_KEY not configured' }, { status: 500 });
+  }
 
-  const embRes = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: `${platform} ${category} ${title} ${content}`,
-  });
-  const embedding = embRes.data[0].embedding;
+  const embedding = await embedText(`${platform} ${category} ${title} ${content}`);
 
   const { createClient } = await import('@supabase/supabase-js');
   const supabase = createClient(

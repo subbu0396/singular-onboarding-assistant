@@ -1,18 +1,12 @@
--- Run in Supabase SQL Editor to set up the RAG knowledge base.
+-- Migrate existing integration_patterns from OpenAI (1536) to Voyage (512) embeddings.
+-- Run in Supabase SQL Editor, then re-run: npm run seed:kb
 
-create extension if not exists vector;
+drop index if exists integration_patterns_embedding_idx;
+alter table integration_patterns drop column if exists embedding;
 
-create table if not exists integration_patterns (
-  id bigserial primary key,
-  platform text not null,
-  category text not null,
-  title text not null,
-  content text not null,
-  embedding vector(512),
-  created_at timestamp with time zone default now()
-);
+alter table integration_patterns add column embedding vector(512);
 
-create index if not exists integration_patterns_embedding_idx
+create index integration_patterns_embedding_idx
   on integration_patterns
   using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);

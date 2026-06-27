@@ -20,7 +20,7 @@ export async function retrievePatterns(formData) {
 
   if (!queryTerms.trim()) return '';
 
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !process.env.OPENAI_API_KEY) {
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY || !process.env.VOYAGE_API_KEY) {
     return '';
   }
 

@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
+import { VoyageAIClient } from 'voyageai';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: '.env.local' });
@@ -9,14 +9,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 );
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 async function embed(text) {
-  const res = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: text,
+  const voyage = new VoyageAIClient({
+    apiKey: process.env.VOYAGE_API_KEY,
   });
-  return res.data[0].embedding;
+
+  const response = await voyage.embed({
+    input: [text],
+    model: 'voyage-3-lite',
+  });
+
+  return response.embeddings[0];
 }
 
 const patterns = [
