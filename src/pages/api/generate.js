@@ -31,6 +31,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ docType, content });
   } catch (error) {
     console.error('Document generation error:', error);
-    return res.status(502).json({ error: 'Failed to generate document' });
+    return res.status(500).json({ error: error.message || 'Document generation failed' });
   }
 }

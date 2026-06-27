@@ -105,7 +105,38 @@ function scrollToFirstError(errorKeys) {
   });
 }
 
-export default function Form({ onSubmit, isLoading }) {
+const GENERATION_STEPS = [
+  'Analyzing tech stack...',
+  'Generating documents...',
+  'Finalizing...',
+];
+
+function GenerationProgress({ loadingStep }) {
+  const currentIndex = GENERATION_STEPS.indexOf(loadingStep);
+
+  return (
+    <div className="mt-4">
+      {GENERATION_STEPS.map((step, i) => {
+        const isDone = i < currentIndex;
+        const isActive = step === loadingStep;
+
+        return (
+          <div
+            key={step}
+            className={`mb-2 flex items-center gap-2 ${isDone || isActive ? 'opacity-100' : 'opacity-30'}`}
+          >
+            <span className="text-sm">{isDone ? '✓' : isActive ? '⏳' : '○'}</span>
+            <span className={`text-sm ${isActive ? 'font-medium text-white' : 'text-slate-400'}`}>
+              {step}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function Form({ onSubmit, isLoading, loadingStep, error, onClearError }) {
   const [currentStep, setCurrentStep] = useState(0);
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
@@ -413,24 +444,48 @@ export default function Form({ onSubmit, isLoading }) {
           </button>
         </div>
 
-        <div className="mt-4 flex items-center justify-between">
-          <button
-            type="button"
-            onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
-            disabled={currentStep === 0}
-            className="btn-secondary disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Back
-          </button>
+        <div className="mt-4 flex flex-col">
+          {error && (
+            <div className="mb-3 flex items-center justify-between rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-sm text-red-400">
+              <span>⚠ {error}</span>
+              <button
+                type="button"
+                onClick={onClearError}
+                className="cursor-pointer border-none bg-transparent px-1 text-base text-red-400"
+                aria-label="Dismiss error"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
-          {currentStep < SECTIONS.length - 1 ? (
-            <button type="button" onClick={handleNext} className="btn-primary">
-              Next
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
+              disabled={currentStep === 0 || isLoading}
+              className="btn-secondary disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Back
             </button>
-          ) : (
-            <button type="submit" disabled={isLoading} className="btn-primary">
-              {isLoading ? 'Generating...' : 'Generate Documents'}
-            </button>
+
+            {currentStep < SECTIONS.length - 1 ? (
+              <button type="button" onClick={handleNext} disabled={isLoading} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">
+                Next
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={isLoading}
+                className="btn-primary disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isLoading ? 'Generating...' : 'Generate Documents'}
+              </button>
+            )}
+          </div>
+
+          {isLoading && currentStep === SECTIONS.length - 1 && (
+            <GenerationProgress loadingStep={loadingStep} />
           )}
         </div>
       </div>

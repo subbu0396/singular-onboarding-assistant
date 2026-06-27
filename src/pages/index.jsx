@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import Form from '@/components/Form';
-import LoadingState from '@/components/LoadingState';
 import ResultsTabs from '@/components/ResultsTabs';
 import { DOC_TYPES } from '@/lib/formConfig';
 
@@ -28,48 +27,44 @@ export default function Home() {
   const [documents, setDocuments] = useState(EMPTY_DOCS);
   const [errors, setErrors] = useState(EMPTY_ERRORS);
   const [loadingDocs, setLoadingDocs] = useState(EMPTY_LOADING);
-  const [progressStep, setProgressStep] = useState(1);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingStep, setLoadingStep] = useState('');
+  const [error, setError] = useState(null);
 
   const generateAll = useCallback(async (form) => {
-    setIsGenerating(true);
-    setView('loading');
-    setProgressStep(1);
+    setIsLoading(true);
+    setError(null);
     setFormData(form);
     setDocuments(EMPTY_DOCS);
     setErrors(EMPTY_ERRORS);
 
-    const progressTimer1 = setTimeout(() => setProgressStep(2), 1500);
-    const progressTimer2 = setTimeout(() => setProgressStep(3), 4000);
-
     try {
+      setLoadingStep('Analyzing tech stack...');
+      await new Promise((r) => setTimeout(r, 700));
+
+      setLoadingStep('Generating documents...');
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ form, generateAll: true }),
       });
 
-      const data = await res.json();
-
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to generate documents');
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Request failed (${res.status})`);
       }
 
+      setLoadingStep('Finalizing...');
+      await new Promise((r) => setTimeout(r, 400));
+
+      const data = await res.json();
       setDocuments(data.documents);
       setView('results');
     } catch (err) {
-      const message = err.message || 'An unexpected error occurred';
-      setErrors({
-        [DOC_TYPES.RUNBOOK]: message,
-        [DOC_TYPES.FAQ]: message,
-        [DOC_TYPES.CHECKLIST]: message,
-      });
-      setView('results');
+      setError(err.message || 'Something went wrong. Please try again.');
     } finally {
-      clearTimeout(progressTimer1);
-      clearTimeout(progressTimer2);
-      setIsGenerating(false);
-      setProgressStep(3);
+      setIsLoading(false);
+      setLoadingStep('');
     }
   }, []);
 
@@ -87,12 +82,12 @@ export default function Home() {
           body: JSON.stringify({ form: formData, docType }),
         });
 
-        const data = await res.json();
-
         if (!res.ok) {
-          throw new Error(data.error || 'Failed to regenerate document');
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Request failed (${res.status})`);
         }
 
+        const data = await res.json();
         setDocuments((prev) => ({ ...prev, [docType]: data.content }));
       } catch (err) {
         setErrors((prev) => ({
@@ -119,7 +114,9 @@ export default function Home() {
     setDocuments(EMPTY_DOCS);
     setErrors(EMPTY_ERRORS);
     setLoadingDocs(EMPTY_LOADING);
-    setProgressStep(1);
+    setError(null);
+    setLoadingStep('');
+    setIsLoading(false);
   };
 
   return (
@@ -148,11 +145,15 @@ export default function Home() {
                 Enter the client&apos;s integration details and select your MMP platform to generate tailored onboarding documents.
               </p>
             </div>
-            <Form onSubmit={generateAll} isLoading={isGenerating} />
+            <Form
+              onSubmit={generateAll}
+              isLoading={isLoading}
+              loadingStep={loadingStep}
+              error={error}
+              onClearError={() => setError(null)}
+            />
           </>
         )}
-
-        {view === 'loading' && <LoadingState progressStep={progressStep} />}
 
         {view === 'results' && (
           <ResultsTabs
