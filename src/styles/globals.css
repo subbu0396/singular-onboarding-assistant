@@ -20,6 +20,24 @@
       placeholder:text-slate-500 focus:border-indigo-accent focus:outline-none focus:ring-1 focus:ring-indigo-accent;
   }
 
+  /* Native date picker — icon is browser-controlled; styled via pseudo-element below */
+  .form-input[type='date'],
+  .form-input[type='datetime-local'] {
+    color-scheme: dark;
+  }
+
+  .form-input[type='date']::-webkit-calendar-picker-indicator,
+  .form-input[type='datetime-local']::-webkit-calendar-picker-indicator {
+    filter: invert(1);
+    cursor: pointer;
+    opacity: 0.9;
+  }
+
+  .form-input[type='date']::-webkit-calendar-picker-indicator:hover,
+  .form-input[type='datetime-local']::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+  }
+
   .form-label {
     @apply mb-1.5 block text-sm font-medium text-slate-300;
   }
