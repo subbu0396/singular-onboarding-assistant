@@ -6,6 +6,7 @@ import {
   buildFaqPrompt,
   buildChecklistPrompt,
 } from '@/lib/server/claudeClient';
+import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -120,7 +121,12 @@ export async function POST(req) {
     }
 
     try {
-      const content = await callClaude(apiKey, systemPrompts, buildUserPrompt(body.form));
+      const ragContext = await retrievePatterns(body.form);
+      const content = await callClaude(
+        apiKey,
+        systemPrompts,
+        buildUserPrompt(body.form, ragContext)
+      );
       return Response.json({ docType: body.docType, content });
     } catch (error) {
       console.error('Document generation error:', error);
@@ -142,16 +148,24 @@ export async function POST(req) {
       };
 
       try {
+        const ragContext = await retrievePatterns(formData);
+
         await Promise.all([
-          callClaude(apiKey, [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK], buildRunbookPrompt(formData)).then(
-            (text) => send({ type: 'runbook', content: text })
-          ),
-          callClaude(apiKey, [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK], buildFaqPrompt(formData)).then((text) =>
-            send({ type: 'faq', content: text })
-          ),
-          callClaude(apiKey, [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK], buildChecklistPrompt(formData)).then(
-            (text) => send({ type: 'checklist', content: text })
-          ),
+          callClaude(
+            apiKey,
+            [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK],
+            buildRunbookPrompt(formData, ragContext)
+          ).then((text) => send({ type: 'runbook', content: text })),
+          callClaude(
+            apiKey,
+            [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK],
+            buildFaqPrompt(formData, ragContext)
+          ).then((text) => send({ type: 'faq', content: text })),
+          callClaude(
+            apiKey,
+            [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK],
+            buildChecklistPrompt(formData, ragContext)
+          ).then((text) => send({ type: 'checklist', content: text })),
         ]);
 
         send({ type: 'done' });
