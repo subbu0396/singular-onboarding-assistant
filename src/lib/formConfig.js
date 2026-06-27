@@ -143,6 +143,38 @@ export const INITIAL_FORM_STATE = {
   onboardingUrgency: '',
 };
 
+export const SECTION_FIELDS = {
+  clientInfo: ['clientName', 'targetMmp', 'industry', 'primaryMarket'],
+  sdkSetup: ['platforms', 'currentMmp', 'attributionModel'],
+  integrationType: ['integrationMethods', 'dataExportMethods', 'eventTrackingMethod'],
+  techEnvironment: ['backendLanguage', 'hasDataWarehouse', 'usesCdp', 'cdpName', 'authMethod'],
+  timeline: ['targetGoLiveDate', 'onboardingUrgency'],
+};
+
+export function getSectionDefaults(sectionKey) {
+  const fields = SECTION_FIELDS[sectionKey] || [];
+  return Object.fromEntries(fields.map((field) => [field, INITIAL_FORM_STATE[field]]));
+}
+
+export function resetSectionFields(form, sectionKey) {
+  return { ...form, ...getSectionDefaults(sectionKey) };
+}
+
+export function isSectionDirty(form, sectionKey) {
+  const defaults = getSectionDefaults(sectionKey);
+  return Object.keys(defaults).some((field) => {
+    const current = form[field];
+    const initial = defaults[field];
+    if (Array.isArray(current) && Array.isArray(initial)) {
+      return current.length > 0;
+    }
+    if (typeof current === 'boolean') {
+      return current !== initial;
+    }
+    return Boolean(current);
+  });
+}
+
 export function formatList(items) {
   if (!items || items.length === 0) return 'Not specified';
   return items.join(', ');

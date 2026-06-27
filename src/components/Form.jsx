@@ -15,6 +15,8 @@ import {
   TARGET_MMP_PLATFORMS,
   INITIAL_FORM_STATE,
   validateForm,
+  resetSectionFields,
+  isSectionDirty,
 } from '@/lib/formConfig';
 
 function CheckboxGroup({ label, options, selected, onChange }) {
@@ -108,6 +110,19 @@ export default function Form({ onSubmit, isLoading }) {
   };
 
   const section = SECTIONS[currentStep];
+
+  const handleResetSection = () => {
+    setForm((prev) => resetSectionFields(prev, section.key));
+    setErrors([]);
+  };
+
+  const handleStartOver = () => {
+    setForm(INITIAL_FORM_STATE);
+    setCurrentStep(0);
+    setErrors([]);
+  };
+
+  const sectionIsDirty = isSectionDirty(form, section.key);
 
   const renderSection = () => {
     switch (section.key) {
@@ -321,7 +336,26 @@ export default function Form({ onSubmit, isLoading }) {
           </div>
         )}
 
-        <div className="mt-8 flex items-center justify-between">
+        <div className="mt-6 flex flex-wrap gap-2 border-t border-slate-800 pt-4">
+          <button
+            type="button"
+            onClick={handleResetSection}
+            disabled={!sectionIsDirty || isLoading}
+            className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reset Section
+          </button>
+          <button
+            type="button"
+            onClick={handleStartOver}
+            disabled={isLoading}
+            className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Start Over
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-center justify-between">
           <button
             type="button"
             onClick={() => setCurrentStep((s) => Math.max(0, s - 1))}
