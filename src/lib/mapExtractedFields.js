@@ -1,4 +1,4 @@
-export function mapExtractedToForm(extracted) {
+function mapExtractedToForm(extracted) {
   return {
     clientName: extracted.clientName,
     industry: extracted.industry,

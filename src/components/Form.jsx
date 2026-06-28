@@ -242,11 +242,13 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
               <FieldError message={errors.clientName} />
             </div>
             <SelectField
+              id="targetMmp"
               label="Target MMP Platform"
               value={form.targetMmp}
               onChange={(v) => update('targetMmp', v)}
               options={TARGET_MMP_PLATFORMS}
               placeholder="Select attribution platform..."
+              error={errors.targetMmp}
             />
             <p className="text-xs text-slate-500">
               Documents will be generated for the selected mobile measurement platform.

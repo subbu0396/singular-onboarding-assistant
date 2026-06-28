@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
 import { DOC_TYPES } from '@/lib/formConfig';
@@ -71,27 +71,60 @@ export default function Home() {
   const [loadingStep, setLoadingStep] = useState('');
   const [error, setError] = useState(null);
 
-  const handleDocEvent = useCallback((event) => {
-    const parsed = parseDocEvent(event.type);
-    if (!parsed) return false;
-    const { docType, kind } = parsed;
+  const deltaBufferRef = useRef({});
+  const flushScheduledRef = useRef(false);
 
-    if (kind === 'delta') {
-      setDocuments((prev) => ({
-        ...prev,
-        [docType]: (prev[docType] || '') + event.delta,
-      }));
-    } else if (kind === 'complete') {
-      setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
-    } else if (kind === 'error') {
-      setErrors((prev) => ({ ...prev, [docType]: event.message || 'Generation failed' }));
-      setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
-    }
-    return true;
+  const flushDeltas = useCallback(() => {
+    flushScheduledRef.current = false;
+    const buffer = deltaBufferRef.current;
+    const docTypes = Object.keys(buffer);
+    if (docTypes.length === 0) return;
+    deltaBufferRef.current = {};
+    setDocuments((prev) => {
+      const next = { ...prev };
+      for (const docType of docTypes) {
+        next[docType] = (next[docType] || '') + buffer[docType];
+      }
+      return next;
+    });
   }, []);
+
+  const scheduleFlush = useCallback(() => {
+    if (flushScheduledRef.current) return;
+    flushScheduledRef.current = true;
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(flushDeltas);
+    } else {
+      setTimeout(flushDeltas, 16);
+    }
+  }, [flushDeltas]);
+
+  const handleDocEvent = useCallback(
+    (event) => {
+      const parsed = parseDocEvent(event.type);
+      if (!parsed) return false;
+      const { docType, kind } = parsed;
+
+      if (kind === 'delta') {
+        deltaBufferRef.current[docType] =
+          (deltaBufferRef.current[docType] || '') + event.delta;
+        scheduleFlush();
+      } else if (kind === 'complete') {
+        flushDeltas();
+        setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
+      } else if (kind === 'error') {
+        flushDeltas();
+        setErrors((prev) => ({ ...prev, [docType]: event.message || 'Generation failed' }));
+        setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
+      }
+      return true;
+    },
+    [flushDeltas, scheduleFlush]
+  );
 
   const generateAll = useCallback(
     async (form) => {
+      deltaBufferRef.current = {};
       setIsLoading(true);
       setError(null);
       setFormData(form);
@@ -131,6 +164,7 @@ export default function Home() {
     async (docType) => {
       if (!formData) return;
 
+      delete deltaBufferRef.current[docType];
       setLoadingDocs((prev) => ({ ...prev, [docType]: true }));
       setErrors((prev) => ({ ...prev, [docType]: null }));
       setDocuments((prev) => ({ ...prev, [docType]: '' }));
@@ -165,6 +199,7 @@ export default function Home() {
   const retryDoc = useCallback((docType) => regenerateDoc(docType), [regenerateDoc]);
 
   const handleStartOver = () => {
+    deltaBufferRef.current = {};
     setView('form');
     setFormData(null);
     setDocuments(EMPTY_DOCS);

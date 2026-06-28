@@ -19,8 +19,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-markdown": "^9.0.1",
-    "remark-gfm": "^4.0.0",
-    "voyageai": "^0.4.0"
+    "remark-gfm": "^4.0.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",

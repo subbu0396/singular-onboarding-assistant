@@ -324,10 +324,16 @@ async function renderPdf(title, markdown, filename) {
     const { jsPDF } = await import('jspdf');
 
     const measureHost = createMeasureHost(styleEl);
-    const rawBlocks = collectPaginatableBlocks(contentEl);
-    const blocks = flattenBlocks(rawBlocks, measureHost, PDF_PAGE_INNER_HEIGHT_PX);
-    const pages = paginateBlocks(blocks, measureHost, PDF_PAGE_INNER_HEIGHT_PX);
-    document.body.removeChild(measureHost);
+    let pages;
+    try {
+      const rawBlocks = collectPaginatableBlocks(contentEl);
+      const blocks = flattenBlocks(rawBlocks, measureHost, PDF_PAGE_INNER_HEIGHT_PX);
+      pages = paginateBlocks(blocks, measureHost, PDF_PAGE_INNER_HEIGHT_PX);
+    } finally {
+      if (measureHost.parentNode === document.body) {
+        document.body.removeChild(measureHost);
+      }
+    }
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
     const margin = 10;
