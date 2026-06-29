@@ -44,6 +44,14 @@ function decodeBase64ToBytes(str) {
   return bytes;
 }
 
+function decodeHexToBytes(str) {
+  const bytes = new Uint8Array(str.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(str.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
 function getEncryptionKey() {
   if (cachedKey) return cachedKey;
   const secret = process.env.SESSION_SECRET;
@@ -53,18 +61,42 @@ function getEncryptionKey() {
     );
   }
 
+  // Aggressive cleanup — strip all whitespace and surrounding quotes that
+  // sometimes survive a Vercel env-var paste from a terminal.
+  const cleaned = secret
+    .replace(/\s+/g, '')
+    .replace(/^['"`]+|['"`]+$/g, '');
+
   let keyBytes;
-  try {
-    keyBytes = decodeBase64ToBytes(secret.trim());
-  } catch {
+  let decodeError = null;
+
+  // Try hex first if it looks like hex (handles `openssl rand -hex 32`).
+  if (/^[0-9a-fA-F]{64}$/.test(cleaned)) {
+    try {
+      keyBytes = decodeHexToBytes(cleaned);
+    } catch (err) {
+      decodeError = err;
+    }
+  }
+
+  // Otherwise try base64 / base64url.
+  if (!keyBytes) {
+    try {
+      keyBytes = decodeBase64ToBytes(cleaned);
+    } catch (err) {
+      decodeError = err;
+    }
+  }
+
+  if (!keyBytes) {
     throw new Error(
-      'SESSION_SECRET could not be decoded as base64. Generate with `node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"`.'
+      `SESSION_SECRET could not be decoded (raw length: ${secret.length}, cleaned length: ${cleaned.length}, error: ${decodeError?.message || decodeError}). Regenerate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" — paste the entire output with no quotes and no extra whitespace.`
     );
   }
 
   if (keyBytes.length !== 32) {
     throw new Error(
-      `SESSION_SECRET must decode to exactly 32 bytes (got ${keyBytes.length}). Re-generate with \`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"\`.`
+      `SESSION_SECRET must decode to exactly 32 bytes (got ${keyBytes.length} from raw length ${secret.length}, cleaned length ${cleaned.length}). Regenerate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
     );
   }
 
