@@ -3,6 +3,7 @@ import { DOC_TYPES, DOC_LABELS } from '@/lib/formConfig';
 import { hasAllDocuments } from '@/lib/combineDocuments';
 import { DOWNLOAD_FORMATS, exportCombinedPackage } from '@/lib/exportDocument';
 import DocCard from './DocCard';
+import SkillProgress from './SkillProgress';
 
 const TAB_ORDER = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
 
@@ -19,7 +20,11 @@ export default function ResultsTabs({
   onRegenerate,
   onRetry,
   onStartOver,
+  skillStatus,
 }) {
+  const hasSkillActivity =
+    skillStatus &&
+    Object.values(skillStatus).some((s) => s !== 'pending');
   const [activeTab, setActiveTab] = useState(DOC_TYPES.RUNBOOK);
   const [downloadFormat, setDownloadFormat] = useState('pdf');
   const [isExporting, setIsExporting] = useState(false);
@@ -56,6 +61,8 @@ export default function ResultsTabs({
           Start Over
         </button>
       </div>
+
+      <SkillProgress skillStatus={skillStatus} visible={hasSkillActivity} />
 
       <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

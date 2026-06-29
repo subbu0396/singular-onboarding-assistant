@@ -29,6 +29,92 @@ ${ragContext}
     : '';
 }
 
+// --- Phase 1 agent skills ---
+// Each analytical skill (1-5) reads its slice of the form and produces
+// a focused considerations block. Skill 6 ("Review & Compile") is the
+// existing 3-doc generation, seeded with the analyses below.
+
+export const SKILLS = [
+  {
+    id: 'client_info',
+    name: 'Client Info',
+    fields: ['clientName', 'targetMmp', 'industry', 'primaryMarket'],
+    focus:
+      'Surface industry-specific event taxonomy expectations, regional data residency or regulatory considerations, and how the target MMP commonly serves this client profile.',
+  },
+  {
+    id: 'sdk_setup',
+    name: 'Mobile SDK Setup',
+    fields: ['platforms', 'currentMmp', 'attributionModel'],
+    focus:
+      'Surface per-platform SDK considerations, migration-specific gotchas if moving from another MMP, and SDK configuration implications of the chosen attribution model.',
+  },
+  {
+    id: 'integration_type',
+    name: 'Integration Type',
+    fields: ['integrationMethods', 'dataExportMethods', 'eventTrackingMethod'],
+    focus:
+      'Surface architectural tradeoffs of the chosen integration methods, export-method coupling, and SDK-vs-S2S event tracking implications.',
+  },
+  {
+    id: 'tech_env',
+    name: 'Technical Environment',
+    fields: ['backendLanguage', 'hasDataWarehouse', 'usesCdp', 'cdpName', 'authMethod'],
+    focus:
+      'Surface backend-language SDK availability, warehouse landing patterns, CDP coexistence considerations, and auth-method implications for postbacks and exports.',
+  },
+  {
+    id: 'timeline',
+    name: 'Go-Live Timeline',
+    fields: ['targetGoLiveDate', 'onboardingUrgency'],
+    focus:
+      'Surface timeline feasibility given the stack complexity, recommend a phased rollout if appropriate, and call out the risk areas most likely to slip the date.',
+  },
+];
+
+const SKILL_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are a section analyst in an MMP onboarding agent. You receive a slice of client information for one section of the onboarding plan and produce a focused, technical analysis of that slice.
+
+Output rules:
+- 120-220 words of plain prose, no markdown headers, no bullet lists.
+- Audience: senior integrations engineers and solutions engineers.
+- Surface considerations, risks, defaults, platform-specific quirks. Do not restate the input verbatim.
+- No preamble ("Here is the analysis...") and no closing summary.
+- Do not write the runbook, FAQ, or checklist itself — your output is intermediate context for a downstream compilation step.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+function buildSkillUserPrompt(skill, form) {
+  const slice = Object.fromEntries(skill.fields.map((f) => [f, form[f]]));
+  const platform = getPlatform(form);
+  return `Section: ${skill.name}
+Target MMP: ${platform}
+${getMigrationNote(form).trim()}
+
+Client slice:
+${JSON.stringify(slice, null, 2)}
+
+Focus: ${skill.focus}
+
+Produce the focused analysis now.`;
+}
+
+function buildAnalysisBlock(skillOutputs) {
+  if (!skillOutputs || Object.keys(skillOutputs).length === 0) return '';
+  const sections = SKILLS.filter((s) => skillOutputs[s.id])
+    .map((s) => `### ${s.name} considerations\n${skillOutputs[s.id].trim()}`)
+    .join('\n\n');
+  if (!sections) return '';
+  return `\nThe agent's section analysts produced the following considerations. Treat these as authoritative context — weave the relevant points into the document, do not contradict them:
+
+${sections}
+
+---\n`;
+}
+
+export { SKILL_SYSTEM_BLOCK, buildSkillUserPrompt, buildAnalysisBlock };
+
 const EXPORT_METHOD_HINTS = {
   Snowflake: `Snowflake export setup defaults:
 - Use a storage integration object backed by an IAM role; do not embed access keys in stages or DDL.
@@ -82,10 +168,11 @@ function buildExportHintsBlock(form) {
   return `\nApply these operational defaults in the Data Export Setup section unless the client's stack contradicts them:\n\n${hints.join('\n\n')}\n\n---\n`;
 }
 
-function buildRunbookPrompt(form, ragContext = '') {
+function buildRunbookPrompt(form, ragContext = '', skillOutputs = null) {
   const platform = getPlatform(form);
   const ragSection = buildRagSection(ragContext);
   const exportHints = buildExportHintsBlock(form);
+  const analysisBlock = buildAnalysisBlock(skillOutputs);
 
   const clientDetailsBlock = `Generate an Integration Runbook for the following client.
 ${getDocSourceNote(form)}
@@ -109,7 +196,7 @@ Client details:
 - Urgency: ${form.onboardingUrgency}${getMigrationNote(form)}`;
 
   return `${clientDetailsBlock}
-${ragSection}${exportHints}
+${ragSection}${exportHints}${analysisBlock}
 All steps, SDK references, dashboard URLs, and terminology must be specific to ${platform}. Do not reference other MMPs unless comparing during migration.
 
 Structure the runbook with these sections:
@@ -126,9 +213,10 @@ Use markdown formatting with clear headings. Be specific to their tech stack, in
 Generate the Runbook now.`;
 }
 
-function buildFaqPrompt(form, ragContext = '') {
+function buildFaqPrompt(form, ragContext = '', skillOutputs = null) {
   const platform = getPlatform(form);
   const ragSection = buildRagSection(ragContext);
+  const analysisBlock = buildAnalysisBlock(skillOutputs);
 
   const clientDetailsBlock = `Generate a FAQ Document for the following client.
 ${getDocSourceNote(form)}
@@ -148,7 +236,7 @@ Client details:
 - Auth Method: ${form.authMethod}${getMigrationNote(form)}`;
 
   return `${clientDetailsBlock}
-${ragSection}
+${ragSection}${analysisBlock}
 Generate 12-15 questions a technical client team would realistically ask about ${platform} SDK setup, attribution logic, postback delays, data discrepancies, dashboard access, and ${formatList(form.dataExportMethods)} data delivery.
 
 Answer each FAQ concisely and accurately using ${platform}-specific terminology. Format as markdown with ### for each question and the answer below it.
@@ -156,12 +244,13 @@ Answer each FAQ concisely and accurately using ${platform}-specific terminology.
 Generate the FAQ now.`;
 }
 
-function buildChecklistPrompt(form, ragContext = '') {
+function buildChecklistPrompt(form, ragContext = '', skillOutputs = null) {
   const platform = getPlatform(form);
   const hasIos = form.platforms?.includes('iOS');
   const skadSection = hasIos ? '- SKAdNetwork Tests' : '';
   const ragSection = buildRagSection(ragContext);
   const exportHints = buildExportHintsBlock(form);
+  const analysisBlock = buildAnalysisBlock(skillOutputs);
 
   const clientDetailsBlock = `Generate a Test Checklist for the following client.
 ${getDocSourceNote(form)}
@@ -175,7 +264,7 @@ Client details:
 - Event Tracking: ${form.eventTrackingMethod}${getMigrationNote(form)}`;
 
   return `${clientDetailsBlock}
-${ragSection}${exportHints}
+${ragSection}${exportHints}${analysisBlock}
 All test steps must reference ${platform} SDK behavior, dashboards, and validation tools.
 
 Format as a checklist with these sections:

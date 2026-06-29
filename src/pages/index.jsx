@@ -5,10 +5,22 @@ import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
 
+const SKILL_IDS = [
+  'client_info',
+  'sdk_setup',
+  'integration_type',
+  'tech_env',
+  'timeline',
+  'review_compile',
+];
+
 const EMPTY_DOCS = Object.fromEntries(DOC_KEYS.map((k) => [k, '']));
 const EMPTY_ERRORS = Object.fromEntries(DOC_KEYS.map((k) => [k, null]));
 const ALL_LOADING = Object.fromEntries(DOC_KEYS.map((k) => [k, true]));
 const NONE_LOADING = Object.fromEntries(DOC_KEYS.map((k) => [k, false]));
+const EMPTY_SKILL_STATUS = Object.fromEntries(
+  SKILL_IDS.map((id) => [id, 'pending'])
+);
 
 const SUFFIXES = ['_delta', '_complete', '_error'];
 
@@ -70,6 +82,7 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [loadingStep, setLoadingStep] = useState('');
   const [error, setError] = useState(null);
+  const [skillStatus, setSkillStatus] = useState(EMPTY_SKILL_STATUS);
 
   const deltaBufferRef = useRef({});
   const flushScheduledRef = useRef(false);
@@ -98,6 +111,22 @@ export default function Home() {
       setTimeout(flushDeltas, 16);
     }
   }, [flushDeltas]);
+
+  const handleSkillEvent = useCallback((event) => {
+    if (event.type === 'skill_start') {
+      setSkillStatus((prev) => ({ ...prev, [event.skillId]: 'active' }));
+      return true;
+    }
+    if (event.type === 'skill_complete') {
+      setSkillStatus((prev) => ({ ...prev, [event.skillId]: 'complete' }));
+      return true;
+    }
+    if (event.type === 'skill_error') {
+      setSkillStatus((prev) => ({ ...prev, [event.skillId]: 'error' }));
+      return true;
+    }
+    return false;
+  }, []);
 
   const handleDocEvent = useCallback(
     (event) => {
@@ -131,7 +160,8 @@ export default function Home() {
       setDocuments(EMPTY_DOCS);
       setErrors(EMPTY_ERRORS);
       setLoadingDocs(ALL_LOADING);
-      setLoadingStep('Generating documents...');
+      setSkillStatus(EMPTY_SKILL_STATUS);
+      setLoadingStep('Agent analyzing client stack...');
       setView('results');
 
       try {
@@ -142,6 +172,12 @@ export default function Home() {
         });
 
         await consumeSSE(res, (event) => {
+          if (handleSkillEvent(event)) {
+            if (event.type === 'skill_start' && event.skillId === 'review_compile') {
+              setLoadingStep('Compiling documents...');
+            }
+            return;
+          }
           if (handleDocEvent(event)) return;
           if (event.type === 'done') {
             setLoadingStep('');
@@ -157,7 +193,7 @@ export default function Home() {
         setLoadingStep('');
       }
     },
-    [handleDocEvent]
+    [handleDocEvent, handleSkillEvent]
   );
 
   const regenerateDoc = useCallback(
@@ -168,6 +204,7 @@ export default function Home() {
       setLoadingDocs((prev) => ({ ...prev, [docType]: true }));
       setErrors((prev) => ({ ...prev, [docType]: null }));
       setDocuments((prev) => ({ ...prev, [docType]: '' }));
+      setSkillStatus(EMPTY_SKILL_STATUS);
 
       try {
         const res = await fetch('/api/generate', {
@@ -177,6 +214,7 @@ export default function Home() {
         });
 
         await consumeSSE(res, (event) => {
+          if (handleSkillEvent(event)) return;
           if (handleDocEvent(event)) return;
           if (event.type === 'error') {
             setErrors((prev) => ({
@@ -193,7 +231,7 @@ export default function Home() {
         setLoadingDocs((prev) => ({ ...prev, [docType]: false }));
       }
     },
-    [formData, handleDocEvent]
+    [formData, handleDocEvent, handleSkillEvent]
   );
 
   const retryDoc = useCallback((docType) => regenerateDoc(docType), [regenerateDoc]);
@@ -205,6 +243,7 @@ export default function Home() {
     setDocuments(EMPTY_DOCS);
     setErrors(EMPTY_ERRORS);
     setLoadingDocs(NONE_LOADING);
+    setSkillStatus(EMPTY_SKILL_STATUS);
     setError(null);
     setLoadingStep('');
     setIsLoading(false);
@@ -260,6 +299,7 @@ export default function Home() {
             onRegenerate={regenerateDoc}
             onRetry={retryDoc}
             onStartOver={handleStartOver}
+            skillStatus={skillStatus}
           />
         )}
       </main>

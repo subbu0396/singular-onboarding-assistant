@@ -6,11 +6,15 @@ import {
   buildRunbookPrompt,
   buildFaqPrompt,
   buildChecklistPrompt,
+  SKILLS,
+  SKILL_SYSTEM_BLOCK,
+  buildSkillUserPrompt,
 } from '@/lib/server/claudeClient';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 6000;
+const SKILL_MAX_TOKENS = 800;
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -69,25 +73,75 @@ Each checklist item format:
 - [ ] **Test:** [what to test] | **Expected:** [expected result] | **Pass criteria:** [how to confirm pass]`,
 };
 
-const DOC_SYSTEM_BLOCKS = {
-  runbook: [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK],
-  faq: [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK],
-  checklist: [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK],
+const DOC_BUILDERS = {
+  runbook: {
+    builder: buildRunbookPrompt,
+    system: [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK],
+  },
+  faq: {
+    builder: buildFaqPrompt,
+    system: [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK],
+  },
+  checklist: {
+    builder: buildChecklistPrompt,
+    system: [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK],
+  },
 };
 
-const DOC_PROMPT_BUILDERS = {
-  runbook: buildRunbookPrompt,
-  faq: buildFaqPrompt,
-  checklist: buildChecklistPrompt,
-};
+const REVIEW_SKILL_ID = 'review_compile';
 
-async function streamDoc(client, docType, systemPrompts, userPrompt, send) {
+async function runSkill(client, skill, form, send) {
+  send({ type: 'skill_start', skillId: skill.id });
+  try {
+    const stream = client.messages.stream({
+      model: MODEL,
+      max_tokens: SKILL_MAX_TOKENS,
+      system: [SKILL_SYSTEM_BLOCK],
+      messages: [{ role: 'user', content: buildSkillUserPrompt(skill, form) }],
+    });
+
+    let output = '';
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        output += event.delta.text;
+      }
+    }
+
+    const final = await stream.finalMessage();
+    if (final.stop_reason === 'refusal') {
+      send({
+        type: 'skill_error',
+        skillId: skill.id,
+        message: 'Refused by safety filters.',
+      });
+      return null;
+    }
+
+    send({ type: 'skill_complete', skillId: skill.id });
+    return output.trim();
+  } catch (err) {
+    const message =
+      err instanceof Anthropic.APIError
+        ? `${skill.id} skill failed (${err.status}): ${err.message}`
+        : err?.message || `${skill.id} skill failed`;
+    send({ type: 'skill_error', skillId: skill.id, message });
+    return null;
+  }
+}
+
+async function streamDoc(client, docType, form, ragContext, skillOutputs, send) {
+  const { builder, system } = DOC_BUILDERS[docType];
   try {
     const stream = client.messages.stream({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      system: systemPrompts,
-      messages: [{ role: 'user', content: userPrompt }],
+      system,
+      messages: [
+        { role: 'user', content: builder(form, ragContext, skillOutputs) },
+      ],
     });
 
     for await (const event of stream) {
@@ -100,7 +154,6 @@ async function streamDoc(client, docType, systemPrompts, userPrompt, send) {
     }
 
     const final = await stream.finalMessage();
-
     if (final.stop_reason === 'refusal') {
       send({
         type: `${docType}_error`,
@@ -117,6 +170,29 @@ async function streamDoc(client, docType, systemPrompts, userPrompt, send) {
         : err?.message || `${docType} generation failed`;
     send({ type: `${docType}_error`, message });
   }
+}
+
+async function runAgent(client, form, ragContext, docTypes, send) {
+  // Skills 1-5 run in parallel — no inter-skill dependencies in Phase 1.
+  const skillResults = await Promise.all(
+    SKILLS.map(async (skill) => ({
+      id: skill.id,
+      output: await runSkill(client, skill, form, send),
+    }))
+  );
+
+  const skillOutputs = Object.fromEntries(
+    skillResults.filter((r) => r.output).map((r) => [r.id, r.output])
+  );
+
+  // Skill 6: parallel doc generations seeded with the skill outputs.
+  send({ type: 'skill_start', skillId: REVIEW_SKILL_ID });
+  await Promise.allSettled(
+    docTypes.map((docType) =>
+      streamDoc(client, docType, form, ragContext, skillOutputs, send)
+    )
+  );
+  send({ type: 'skill_complete', skillId: REVIEW_SKILL_ID });
 }
 
 function buildSSEStream(work) {
@@ -154,12 +230,11 @@ export async function POST(req) {
   const body = await req.json();
   const client = new Anthropic({ apiKey });
 
-  // Single-doc (regenerate) path
+  // Single-doc (regenerate) path — runs the full skill pipeline but only
+  // streams the requested doc. Keeps doc quality consistent with the
+  // initial generation by reusing the same skill analysis.
   if (body.docType && body.form) {
-    const systemPrompts = DOC_SYSTEM_BLOCKS[body.docType];
-    const buildUserPrompt = DOC_PROMPT_BUILDERS[body.docType];
-
-    if (!systemPrompts || !buildUserPrompt) {
+    if (!DOC_BUILDERS[body.docType]) {
       return Response.json(
         { error: `Unknown document type: ${body.docType}` },
         { status: 400 }
@@ -168,47 +243,23 @@ export async function POST(req) {
 
     const stream = buildSSEStream(async (send) => {
       const ragContext = await retrievePatterns(body.form);
-      await streamDoc(
-        client,
-        body.docType,
-        systemPrompts,
-        buildUserPrompt(body.form, ragContext),
-        send
-      );
+      await runAgent(client, body.form, ragContext, [body.docType], send);
     });
 
     return new Response(stream, { headers: SSE_HEADERS });
   }
 
-  // Full generation path: stream all three in parallel
+  // Full generation path: skills 1-5 in parallel, then all three docs.
   const formData = body;
-
   const stream = buildSSEStream(async (send) => {
     const ragContext = await retrievePatterns(formData);
-
-    await Promise.allSettled([
-      streamDoc(
-        client,
-        'runbook',
-        [CACHED_SYSTEM_BLOCK, RUNBOOK_DYNAMIC_BLOCK],
-        buildRunbookPrompt(formData, ragContext),
-        send
-      ),
-      streamDoc(
-        client,
-        'faq',
-        [CACHED_SYSTEM_BLOCK, FAQ_DYNAMIC_BLOCK],
-        buildFaqPrompt(formData, ragContext),
-        send
-      ),
-      streamDoc(
-        client,
-        'checklist',
-        [CACHED_SYSTEM_BLOCK, CHECKLIST_DYNAMIC_BLOCK],
-        buildChecklistPrompt(formData, ragContext),
-        send
-      ),
-    ]);
+    await runAgent(
+      client,
+      formData,
+      ragContext,
+      ['runbook', 'faq', 'checklist'],
+      send
+    );
   });
 
   return new Response(stream, { headers: SSE_HEADERS });
