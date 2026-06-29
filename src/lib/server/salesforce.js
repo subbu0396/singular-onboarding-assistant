@@ -123,3 +123,170 @@ export function isSalesforceConfigured() {
   // active OAuth token bound to the requesting SE.
   return true;
 }
+
+// --- Phase 2 Track B: real Salesforce REST lookup ---
+//
+// Used when the SE has connected their Salesforce account via OAuth. The
+// session shape comes from src/lib/server/session.js:
+//   { access_token, refresh_token, instance_url, issued_at, identity? }
+
+const SF_API_VERSION = 'v60.0';
+const DEFAULT_LOGIN_HOST = 'https://login.salesforce.com';
+
+// Standard fields only — these exist in every Salesforce dev org out of the
+// box. To pull richer data, your org needs custom fields like Platforms__c,
+// Current_MMP__c, etc., and you'd add them to the SELECT list below.
+const ACCOUNT_FIELDS = [
+  'Id',
+  'Name',
+  'Industry',
+  'BillingCountry',
+  'BillingState',
+  'Website',
+  'AnnualRevenue',
+];
+
+function escapeSoql(value) {
+  // SOQL strings escape single quote and backslash.
+  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+async function refreshAccessToken(refreshToken) {
+  const clientId = process.env.SALESFORCE_CLIENT_ID;
+  const clientSecret = process.env.SALESFORCE_CLIENT_SECRET;
+  const loginHost = process.env.SALESFORCE_LOGIN_HOST || DEFAULT_LOGIN_HOST;
+
+  if (!clientId || !clientSecret || !refreshToken) return null;
+
+  const params = new URLSearchParams();
+  params.set('grant_type', 'refresh_token');
+  params.set('client_id', clientId);
+  params.set('client_secret', clientSecret);
+  params.set('refresh_token', refreshToken);
+
+  const res = await fetch(`${loginHost}/services/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('SF token refresh failed', res.status, body);
+    return null;
+  }
+
+  return await res.json();
+}
+
+async function querySalesforceAccount(accessToken, instanceUrl, clientName) {
+  const soql = `SELECT ${ACCOUNT_FIELDS.join(', ')} FROM Account WHERE Name = '${escapeSoql(clientName)}' LIMIT 1`;
+  const url = `${instanceUrl}/services/data/${SF_API_VERSION}/query/?q=${encodeURIComponent(soql)}`;
+
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  return { res, soql };
+}
+
+/**
+ * Real Salesforce Account lookup. Strict case-insensitive equality on Name —
+ * matches the mock's behavior so the agent's expectations don't change when
+ * we swap from Track A to Track B.
+ *
+ * Behavior on missing/expired session: returns { found: false, reason } so
+ * the agent falls back to use_form_data. Token refresh is attempted once on
+ * a 401.
+ *
+ * Returns the same shape as lookupSalesforceClient (the mock):
+ *   { found, account?, reason?, _source }
+ *
+ * Plus optionally { _refreshed_session } when the access token was refreshed
+ * — the route handler uses this to update the cookie.
+ */
+export async function lookupSalesforceClientReal(
+  { clientName },
+  session
+) {
+  if (!session?.access_token || !session?.instance_url) {
+    return {
+      found: false,
+      reason: 'Salesforce is not connected. Fall back to form data.',
+      _source: 'salesforce_real',
+    };
+  }
+
+  if (!clientName || typeof clientName !== 'string') {
+    return {
+      found: false,
+      reason: 'No client name provided',
+      _source: 'salesforce_real',
+    };
+  }
+
+  const normalizedInput = clientName.trim();
+  if (normalizedInput.length < MIN_QUERY_LENGTH) {
+    return {
+      found: false,
+      reason: `Client name "${clientName}" is too short for a Salesforce lookup (minimum ${MIN_QUERY_LENGTH} characters). Fall back to form data.`,
+      _source: 'salesforce_real',
+    };
+  }
+
+  let { res } = await querySalesforceAccount(
+    session.access_token,
+    session.instance_url,
+    normalizedInput
+  );
+
+  let refreshedSession = null;
+
+  if (res.status === 401 && session.refresh_token) {
+    const refreshed = await refreshAccessToken(session.refresh_token);
+    if (refreshed?.access_token) {
+      refreshedSession = {
+        ...session,
+        access_token: refreshed.access_token,
+        instance_url: refreshed.instance_url || session.instance_url,
+        issued_at: Number(refreshed.issued_at) || Date.now(),
+      };
+      ({ res } = await querySalesforceAccount(
+        refreshedSession.access_token,
+        refreshedSession.instance_url,
+        normalizedInput
+      ));
+    }
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('Salesforce query failed', res.status, body);
+    return {
+      found: false,
+      reason: `Salesforce query failed (${res.status}). Fall back to form data.`,
+      _source: 'salesforce_real',
+      ...(refreshedSession ? { _refreshed_session: refreshedSession } : {}),
+    };
+  }
+
+  const data = await res.json();
+  if (!data.records || data.records.length === 0) {
+    return {
+      found: false,
+      reason: `No Salesforce Account exactly matched "${clientName}". Fall back to form data.`,
+      _source: 'salesforce_real',
+      ...(refreshedSession ? { _refreshed_session: refreshedSession } : {}),
+    };
+  }
+
+  // Strip the "attributes" envelope Salesforce adds to every record.
+  const { attributes, ...account } = data.records[0];
+
+  return {
+    found: true,
+    account,
+    _source: 'salesforce_real',
+    ...(refreshedSession ? { _refreshed_session: refreshedSession } : {}),
+  };
+}
