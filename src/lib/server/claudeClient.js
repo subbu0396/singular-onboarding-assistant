@@ -104,9 +104,9 @@ You have two tools:
 - use_form_data: read the client slice from the submitted form. Use this when Salesforce returns not-found, or as a complement to merge known fields.
 
 Process:
-1. Call lookup_salesforce_client with the client name from the user's instruction.
+1. Call lookup_salesforce_client with the client name EXACTLY as it appears in the user's instruction — do not abbreviate, trim, or guess at alternative spellings. The lookup uses strict equality.
 2. If found, base your analysis primarily on the Salesforce record. If specific form fields are also present, mention them as supporting context.
-3. If not found, call use_form_data and base your analysis on that.
+3. If not found, call use_form_data and base your analysis on that. Do not retry the Salesforce lookup with variants — strict equality means a variant will not help.
 4. Produce the analysis. Plain prose, no markdown headers, no bullet lists. Note the data source in your output (e.g., "Per Salesforce..." or "Per the submitted form...").
 
 Do not loop more than necessary. Two tool calls is the maximum you should need.`,
