@@ -20,7 +20,7 @@ function errorRedirect(req, message) {
   });
 }
 
-export async function GET(req) {
+async function handleCallback(req) {
   const url = new URL(req.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
@@ -119,4 +119,20 @@ export async function GET(req) {
   headers.set('Location', home.toString());
 
   return new Response(null, { status: 302, headers });
+}
+
+export async function GET(req) {
+  try {
+    return await handleCallback(req);
+  } catch (err) {
+    console.error('Salesforce callback route error:', err);
+    return Response.json(
+      {
+        error: 'Salesforce callback failed.',
+        detail: err?.message || String(err),
+        hint: 'Common causes: SESSION_SECRET not set or wrong size, Connected App callback URL mismatch.',
+      },
+      { status: 500 }
+    );
+  }
 }
