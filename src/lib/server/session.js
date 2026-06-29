@@ -30,6 +30,20 @@ const ENC = 'A256GCM';
 
 let cachedKey = null;
 
+function decodeBase64ToBytes(str) {
+  // Accepts standard base64 (with +, /, padding) AND base64url (-, _, no padding).
+  // Normalizes to standard base64 then uses atob, which is available in the
+  // Edge runtime. Node's Buffer is NOT available in Edge — do not reach for it.
+  const normalized = str.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 function getEncryptionKey() {
   if (cachedKey) return cachedKey;
   const secret = process.env.SESSION_SECRET;
@@ -38,23 +52,22 @@ function getEncryptionKey() {
       'SESSION_SECRET env var is not configured. Generate one with `node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"` and add it to Vercel.'
     );
   }
-  // Decode the base64 secret into a 32-byte key for A256GCM.
+
   let keyBytes;
   try {
-    keyBytes = base64url.decode(secret);
+    keyBytes = decodeBase64ToBytes(secret.trim());
   } catch {
-    keyBytes = null;
+    throw new Error(
+      'SESSION_SECRET could not be decoded as base64. Generate with `node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"`.'
+    );
   }
-  if (!keyBytes || keyBytes.length !== 32) {
-    // Try standard base64 too.
-    const buf = Buffer.from(secret, 'base64');
-    if (buf.length !== 32) {
-      throw new Error(
-        `SESSION_SECRET must decode to exactly 32 bytes (got ${buf.length}). Generate with \`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"\`.`
-      );
-    }
-    keyBytes = new Uint8Array(buf);
+
+  if (keyBytes.length !== 32) {
+    throw new Error(
+      `SESSION_SECRET must decode to exactly 32 bytes (got ${keyBytes.length}). Re-generate with \`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"\`.`
+    );
   }
+
   cachedKey = keyBytes;
   return cachedKey;
 }
