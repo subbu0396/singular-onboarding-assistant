@@ -14,6 +14,11 @@ const STATE_STYLES = {
   error: 'border-red-700 bg-red-500/10 text-red-300',
 };
 
+const TOOL_LABELS = {
+  lookup_salesforce_client: 'Salesforce',
+  use_form_data: 'Form data',
+};
+
 function StateIndicator({ state, index }) {
   if (state === 'complete') return <span>✓</span>;
   if (state === 'error') return <span>✕</span>;
@@ -25,7 +30,31 @@ function StateIndicator({ state, index }) {
   return <span className="text-[10px] text-slate-600">{index + 1}</span>;
 }
 
-export default function SkillProgress({ skillStatus = {}, visible = true }) {
+function ToolBadge({ call }) {
+  const label = TOOL_LABELS[call.toolName] || call.toolName;
+  if (call.status === 'running') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+        <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
+        {label}
+      </span>
+    );
+  }
+  const ok = call.ok !== false;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${
+        ok
+          ? 'bg-emerald-900/40 text-emerald-300'
+          : 'bg-slate-800 text-slate-400'
+      }`}
+    >
+      {ok ? '✓' : '·'} {label}
+    </span>
+  );
+}
+
+export default function SkillProgress({ skillStatus = {}, toolCalls = {}, visible = true }) {
   if (!visible) return null;
   return (
     <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
@@ -38,15 +67,25 @@ export default function SkillProgress({ skillStatus = {}, visible = true }) {
       <ol className="flex flex-wrap gap-2">
         {SKILLS.map((skill, idx) => {
           const state = skillStatus[skill.id] || 'pending';
+          const calls = toolCalls[skill.id] || [];
           return (
             <li
               key={skill.id}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs transition-colors ${STATE_STYLES[state]}`}
+              className={`flex flex-col gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${STATE_STYLES[state]}`}
             >
-              <span className="flex h-4 w-4 items-center justify-center">
-                <StateIndicator state={state} index={idx} />
-              </span>
-              <span>{skill.name}</span>
+              <div className="flex items-center gap-2">
+                <span className="flex h-4 w-4 items-center justify-center">
+                  <StateIndicator state={state} index={idx} />
+                </span>
+                <span>{skill.name}</span>
+              </div>
+              {calls.length > 0 && (
+                <div className="flex flex-wrap gap-1 pl-6">
+                  {calls.map((call, i) => (
+                    <ToolBadge key={i} call={call} />
+                  ))}
+                </div>
+              )}
             </li>
           );
         })}

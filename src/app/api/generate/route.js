@@ -8,13 +8,19 @@ import {
   buildChecklistPrompt,
   SKILLS,
   SKILL_SYSTEM_BLOCK,
+  SKILL1_SYSTEM_BLOCK,
+  SKILL1_TOOLS,
   buildSkillUserPrompt,
+  buildSkill1UserPrompt,
+  buildFormSlice,
 } from '@/lib/server/claudeClient';
+import { lookupSalesforceClient } from '@/lib/server/salesforce';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 6000;
-const SKILL_MAX_TOKENS = 800;
+const SKILL_MAX_TOKENS = 1500;
+const SKILL1_MAX_ITERATIONS = 4;
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -89,6 +95,135 @@ const DOC_BUILDERS = {
 };
 
 const REVIEW_SKILL_ID = 'review_compile';
+
+// Skill 1 runs as a tool-using agent loop. The other skills (2-5) use the
+// simpler runSkill path below.
+async function runSkill1Agent(client, form, send) {
+  const skillId = 'client_info';
+  send({ type: 'skill_start', skillId });
+
+  const toolHandlers = {
+    lookup_salesforce_client: (input) => lookupSalesforceClient(input),
+    use_form_data: async () =>
+      buildFormSlice(SKILLS.find((s) => s.id === skillId), form),
+  };
+
+  const messages = [
+    { role: 'user', content: buildSkill1UserPrompt(form) },
+  ];
+
+  let finalText = '';
+  let iteration = 0;
+
+  try {
+    while (iteration++ < SKILL1_MAX_ITERATIONS) {
+      const response = await client.messages.create({
+        model: MODEL,
+        max_tokens: SKILL_MAX_TOKENS,
+        system: [SKILL1_SYSTEM_BLOCK],
+        tools: SKILL1_TOOLS,
+        messages,
+      });
+
+      if (response.stop_reason === 'refusal') {
+        send({
+          type: 'skill_error',
+          skillId,
+          message: 'Refused by safety filters.',
+        });
+        return null;
+      }
+
+      // Accumulate text from this turn.
+      for (const block of response.content) {
+        if (block.type === 'text') finalText += block.text;
+      }
+
+      if (response.stop_reason === 'end_turn') break;
+
+      if (response.stop_reason === 'tool_use') {
+        const toolUses = response.content.filter((b) => b.type === 'tool_use');
+        messages.push({ role: 'assistant', content: response.content });
+
+        const toolResults = [];
+        for (const toolUse of toolUses) {
+          send({
+            type: 'tool_call_start',
+            skillId,
+            toolName: toolUse.name,
+            input: toolUse.input,
+          });
+
+          const handler = toolHandlers[toolUse.name];
+          if (!handler) {
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok: false,
+              message: `Unknown tool: ${toolUse.name}`,
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: unknown tool ${toolUse.name}`,
+              is_error: true,
+            });
+            continue;
+          }
+
+          try {
+            const result = await handler(toolUse.input || {});
+            const ok =
+              toolUse.name !== 'lookup_salesforce_client' ||
+              result?.found === true;
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok,
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify(result),
+            });
+          } catch (err) {
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok: false,
+              message: err?.message || 'Tool execution failed',
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: ${err?.message || 'tool failed'}`,
+              is_error: true,
+            });
+          }
+        }
+
+        messages.push({ role: 'user', content: toolResults });
+        continue;
+      }
+
+      // Any other stop reason (max_tokens, etc.) — bail out with what we have.
+      break;
+    }
+
+    send({ type: 'skill_complete', skillId });
+    return finalText.trim() || null;
+  } catch (err) {
+    const message =
+      err instanceof Anthropic.APIError
+        ? `${skillId} skill failed (${err.status}): ${err.message}`
+        : err?.message || `${skillId} skill failed`;
+    send({ type: 'skill_error', skillId, message });
+    return null;
+  }
+}
 
 async function runSkill(client, skill, form, send) {
   send({ type: 'skill_start', skillId: skill.id });
@@ -174,11 +309,15 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
 
 async function runAgent(client, form, ragContext, docTypes, send) {
   // Skills 1-5 run in parallel — no inter-skill dependencies in Phase 1.
+  // Skill 1 is the tool-using agent (Salesforce + form fallback); 2-5 are
+  // static analytical prompts.
   const skillResults = await Promise.all(
-    SKILLS.map(async (skill) => ({
-      id: skill.id,
-      output: await runSkill(client, skill, form, send),
-    }))
+    SKILLS.map(async (skill) => {
+      if (skill.id === 'client_info') {
+        return { id: skill.id, output: await runSkill1Agent(client, form, send) };
+      }
+      return { id: skill.id, output: await runSkill(client, skill, form, send) };
+    })
   );
 
   const skillOutputs = Object.fromEntries(
