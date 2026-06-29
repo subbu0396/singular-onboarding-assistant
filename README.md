@@ -179,4 +179,4 @@ src/
 
 ## Credits
 
-Built end-to-end with [Claude](https://claude.com/) and [Claude Code](https://claude.com/claude-code) — including the architecture decisions, the agent pipeline, the OAuth integration, and most of this README.
+Built by Subramanyam and end-to-end with [Claude](https://claude.com/), [Claude Code](https://claude.com/claude-code) and [Cursor](https://cursor.com/) — including the architecture decisions, the agent pipeline, the OAuth integration, and some of this README.
