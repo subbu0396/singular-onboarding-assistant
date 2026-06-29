@@ -58,14 +58,28 @@ const MOCK_ACCOUNTS = {
   },
 };
 
+const MIN_QUERY_LENGTH = 3;
+
+function matchesAccountName(input, accountName) {
+  const inputLc = input.trim().toLowerCase();
+  if (inputLc.length < MIN_QUERY_LENGTH) return false;
+  const accountLc = accountName.toLowerCase();
+  // User typed the account name with extra suffix (e.g. "Acme Gaming Inc")
+  if (inputLc.includes(accountLc)) return true;
+  // Input is a prefix of any word in the account name. Avoids the false
+  // positives a bare substring match produces (e.g. "s" matching "Shopping").
+  return accountLc.split(/\s+/).some((word) => word.startsWith(inputLc));
+}
+
 /**
  * Mock Salesforce lookup. Returns either a found Account or a not-found marker.
  * Real implementation (Track B) will be:
  *
- *   GET /services/data/v60.0/query/?q=SELECT+Name,Industry,...+FROM+Account+WHERE+Name+LIKE+'%{clientName}%'+LIMIT+1
+ *   GET /services/data/v60.0/query/?q=SELECT+Name,Industry,...+FROM+Account+WHERE+Name+LIKE+'{clientName}%'+LIMIT+1
  *   Authorization: Bearer {access_token}
  *
- * with token refresh on 401.
+ * with token refresh on 401. Note the same MIN_QUERY_LENGTH guard will apply
+ * to the real query — a SOQL LIKE on a single letter returns garbage.
  */
 export async function lookupSalesforceClient({ clientName }) {
   // Simulate network latency so the UI tool-call indicator is visible.
@@ -79,10 +93,16 @@ export async function lookupSalesforceClient({ clientName }) {
     };
   }
 
-  // Case-insensitive partial match — same behavior as a real SOQL LIKE query.
-  const normalized = clientName.trim().toLowerCase();
-  const hit = Object.entries(MOCK_ACCOUNTS).find(
-    ([name]) => name.toLowerCase().includes(normalized) || normalized.includes(name.toLowerCase())
+  if (clientName.trim().length < MIN_QUERY_LENGTH) {
+    return {
+      found: false,
+      reason: `Client name "${clientName}" is too short for a Salesforce lookup (minimum ${MIN_QUERY_LENGTH} characters). Fall back to form data.`,
+      _source: 'salesforce_mock',
+    };
+  }
+
+  const hit = Object.entries(MOCK_ACCOUNTS).find(([name]) =>
+    matchesAccountName(clientName, name)
   );
 
   if (!hit) {
