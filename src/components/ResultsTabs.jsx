@@ -21,6 +21,7 @@ export default function ResultsTabs({
   onRetry,
   onStartOver,
   skillStatus,
+  toolCalls,
 }) {
   const hasSkillActivity =
     skillStatus &&
@@ -62,7 +63,11 @@ export default function ResultsTabs({
         </button>
       </div>
 
-      <SkillProgress skillStatus={skillStatus} visible={hasSkillActivity} />
+      <SkillProgress
+        skillStatus={skillStatus}
+        toolCalls={toolCalls}
+        visible={hasSkillActivity}
+      />
 
       <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

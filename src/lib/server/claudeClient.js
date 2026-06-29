@@ -85,6 +85,78 @@ Output rules:
   cache_control: { type: 'ephemeral' },
 };
 
+// --- Skill 1: Client Info (tool-using agent) ---
+//
+// Phase 2 elevates Skill 1 from a static prompt to a Claude agent loop with
+// two tools:
+//   - lookup_salesforce_client: look up the client account in Salesforce
+//   - use_form_data: read the client slice from the submitted form
+//
+// The agent decides which tool(s) to call. The other skills (2-5) remain
+// static prompts for now.
+
+const SKILL1_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are the Client Info skill in an MMP onboarding agent. Your job is to gather authoritative client information and produce 120-220 words of focused analysis surfacing onboarding considerations (industry-specific event taxonomy, regional regulatory or data residency concerns, target MMP fit).
+
+You have two tools:
+- lookup_salesforce_client: look up the client in Salesforce CRM. Use this FIRST when you have a client name. The CRM is the source of truth.
+- use_form_data: read the client slice from the submitted form. Use this when Salesforce returns not-found, or as a complement to merge known fields.
+
+Process:
+1. Call lookup_salesforce_client with the client name from the user's instruction.
+2. If found, base your analysis primarily on the Salesforce record. If specific form fields are also present, mention them as supporting context.
+3. If not found, call use_form_data and base your analysis on that.
+4. Produce the analysis. Plain prose, no markdown headers, no bullet lists. Note the data source in your output (e.g., "Per Salesforce..." or "Per the submitted form...").
+
+Do not loop more than necessary. Two tool calls is the maximum you should need.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+export const SKILL1_TOOLS = [
+  {
+    name: 'lookup_salesforce_client',
+    description:
+      'Look up the client Account in Salesforce by name. Returns the Account record (Industry, BillingCountry, custom MMP fields) if found, or a not-found marker. Call this first when you have a client name.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        clientName: {
+          type: 'string',
+          description: 'The client company name from the user instruction',
+        },
+      },
+      required: ['clientName'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'use_form_data',
+    description:
+      'Read the Client Info slice from the form submitted by the integrations team. Returns clientName, industry, primaryMarket, targetMmp. Use this when Salesforce is not configured, returns not-found, or to complement Salesforce data with form fields.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+];
+
+export function buildSkill1UserPrompt(form) {
+  return `Gather authoritative information about the client and produce the Client Info section analysis.
+
+Client name from the user instruction: "${form.clientName || '(not provided)'}"
+Target MMP: ${getPlatform(form)}
+
+Use your tools to gather data, then produce the analysis as plain prose. Note your data source in the output.`;
+}
+
+export function buildFormSlice(skill, form) {
+  return Object.fromEntries(skill.fields.map((f) => [f, form[f]]));
+}
+
+export { SKILL1_SYSTEM_BLOCK };
+
 function buildSkillUserPrompt(skill, form) {
   const slice = Object.fromEntries(skill.fields.map((f) => [f, form[f]]));
   const platform = getPlatform(form);

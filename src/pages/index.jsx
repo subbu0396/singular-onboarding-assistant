@@ -21,6 +21,7 @@ const NONE_LOADING = Object.fromEntries(DOC_KEYS.map((k) => [k, false]));
 const EMPTY_SKILL_STATUS = Object.fromEntries(
   SKILL_IDS.map((id) => [id, 'pending'])
 );
+const EMPTY_TOOL_CALLS = {};
 
 const SUFFIXES = ['_delta', '_complete', '_error'];
 
@@ -83,6 +84,7 @@ export default function Home() {
   const [loadingStep, setLoadingStep] = useState('');
   const [error, setError] = useState(null);
   const [skillStatus, setSkillStatus] = useState(EMPTY_SKILL_STATUS);
+  const [toolCalls, setToolCalls] = useState(EMPTY_TOOL_CALLS);
 
   const deltaBufferRef = useRef({});
   const flushScheduledRef = useRef(false);
@@ -125,6 +127,34 @@ export default function Home() {
       setSkillStatus((prev) => ({ ...prev, [event.skillId]: 'error' }));
       return true;
     }
+    if (event.type === 'tool_call_start') {
+      setToolCalls((prev) => ({
+        ...prev,
+        [event.skillId]: [
+          ...(prev[event.skillId] || []),
+          { toolName: event.toolName, status: 'running', ok: null },
+        ],
+      }));
+      return true;
+    }
+    if (event.type === 'tool_call_complete') {
+      setToolCalls((prev) => {
+        const existing = prev[event.skillId] || [];
+        const idx = existing
+          .map((c, i) => ({ c, i }))
+          .reverse()
+          .find(({ c }) => c.toolName === event.toolName && c.status === 'running');
+        if (!idx) return prev;
+        const next = [...existing];
+        next[idx.i] = {
+          ...next[idx.i],
+          status: 'done',
+          ok: event.ok !== false,
+        };
+        return { ...prev, [event.skillId]: next };
+      });
+      return true;
+    }
     return false;
   }, []);
 
@@ -161,6 +191,7 @@ export default function Home() {
       setErrors(EMPTY_ERRORS);
       setLoadingDocs(ALL_LOADING);
       setSkillStatus(EMPTY_SKILL_STATUS);
+      setToolCalls(EMPTY_TOOL_CALLS);
       setLoadingStep('Agent analyzing client stack...');
       setView('results');
 
@@ -205,6 +236,7 @@ export default function Home() {
       setErrors((prev) => ({ ...prev, [docType]: null }));
       setDocuments((prev) => ({ ...prev, [docType]: '' }));
       setSkillStatus(EMPTY_SKILL_STATUS);
+      setToolCalls(EMPTY_TOOL_CALLS);
 
       try {
         const res = await fetch('/api/generate', {
@@ -244,6 +276,7 @@ export default function Home() {
     setErrors(EMPTY_ERRORS);
     setLoadingDocs(NONE_LOADING);
     setSkillStatus(EMPTY_SKILL_STATUS);
+    setToolCalls(EMPTY_TOOL_CALLS);
     setError(null);
     setLoadingStep('');
     setIsLoading(false);
@@ -300,6 +333,7 @@ export default function Home() {
             onRetry={retryDoc}
             onStartOver={handleStartOver}
             skillStatus={skillStatus}
+            toolCalls={toolCalls}
           />
         )}
       </main>
