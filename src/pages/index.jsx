@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
+import SalesforceConnect from '@/components/SalesforceConnect';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -286,14 +287,17 @@ export default function Home() {
     <div className="min-h-screen bg-slate-950">
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-4 py-5 sm:px-6">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-accent">
-            <span className="text-sm font-bold text-white">M</span>
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-accent">
+              <span className="text-sm font-bold text-white">M</span>
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-white">MMP Onboarding Assistant</h1>
+              <p className="text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-semibold text-white">MMP Onboarding Assistant</h1>
-            <p className="text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
-          </div>
+          <SalesforceConnect />
         </div>
       </header>
 

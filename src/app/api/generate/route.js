@@ -14,7 +14,8 @@ import {
   buildSkill1UserPrompt,
   buildFormSlice,
 } from '@/lib/server/claudeClient';
-import { lookupSalesforceClient } from '@/lib/server/salesforce';
+import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
+import { readSession } from '@/lib/server/session';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
@@ -98,12 +99,34 @@ const REVIEW_SKILL_ID = 'review_compile';
 
 // Skill 1 runs as a tool-using agent loop. The other skills (2-5) use the
 // simpler runSkill path below.
-async function runSkill1Agent(client, form, send) {
+async function runSkill1Agent(client, form, sfSession, send) {
   const skillId = 'client_info';
   send({ type: 'skill_start', skillId });
 
+  // Track the latest session in case the lookup tool refreshes the access
+  // token mid-flight — the route handler will rewrite the session cookie
+  // after runAgent returns.
+  const sessionRef = { current: sfSession };
+
   const toolHandlers = {
-    lookup_salesforce_client: (input) => lookupSalesforceClient(input),
+    lookup_salesforce_client: async (input) => {
+      if (sessionRef.current) {
+        const result = await lookupSalesforceClientReal(input, sessionRef.current);
+        if (result._refreshed_session) {
+          sessionRef.current = result._refreshed_session;
+        }
+        const { _refreshed_session, ...visible } = result;
+        return visible;
+      }
+      // No SE session — let the agent know Salesforce isn't connected so it
+      // falls back to use_form_data.
+      return {
+        found: false,
+        reason:
+          'Salesforce is not connected for this session. Fall back to form data.',
+        _source: 'salesforce_unavailable',
+      };
+    },
     use_form_data: async () =>
       buildFormSlice(SKILLS.find((s) => s.id === skillId), form),
   };
@@ -214,14 +237,22 @@ async function runSkill1Agent(client, form, send) {
     }
 
     send({ type: 'skill_complete', skillId });
-    return finalText.trim() || null;
+    return {
+      output: finalText.trim() || null,
+      refreshedSession:
+        sessionRef.current !== sfSession ? sessionRef.current : null,
+    };
   } catch (err) {
     const message =
       err instanceof Anthropic.APIError
         ? `${skillId} skill failed (${err.status}): ${err.message}`
         : err?.message || `${skillId} skill failed`;
     send({ type: 'skill_error', skillId, message });
-    return null;
+    return {
+      output: null,
+      refreshedSession:
+        sessionRef.current !== sfSession ? sessionRef.current : null,
+    };
   }
 }
 
@@ -307,14 +338,15 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
   }
 }
 
-async function runAgent(client, form, ragContext, docTypes, send) {
+async function runAgent(client, form, ragContext, docTypes, sfSession, send) {
   // Skills 1-5 run in parallel — no inter-skill dependencies in Phase 1.
   // Skill 1 is the tool-using agent (Salesforce + form fallback); 2-5 are
   // static analytical prompts.
   const skillResults = await Promise.all(
     SKILLS.map(async (skill) => {
       if (skill.id === 'client_info') {
-        return { id: skill.id, output: await runSkill1Agent(client, form, send) };
+        const { output } = await runSkill1Agent(client, form, sfSession, send);
+        return { id: skill.id, output };
       }
       return { id: skill.id, output: await runSkill(client, skill, form, send) };
     })
@@ -368,6 +400,7 @@ export async function POST(req) {
 
   const body = await req.json();
   const client = new Anthropic({ apiKey });
+  const sfSession = await readSession(req);
 
   // Single-doc (regenerate) path — runs the full skill pipeline but only
   // streams the requested doc. Keeps doc quality consistent with the
@@ -382,7 +415,14 @@ export async function POST(req) {
 
     const stream = buildSSEStream(async (send) => {
       const ragContext = await retrievePatterns(body.form);
-      await runAgent(client, body.form, ragContext, [body.docType], send);
+      await runAgent(
+        client,
+        body.form,
+        ragContext,
+        [body.docType],
+        sfSession,
+        send
+      );
     });
 
     return new Response(stream, { headers: SSE_HEADERS });
@@ -397,6 +437,7 @@ export async function POST(req) {
       formData,
       ragContext,
       ['runbook', 'faq', 'checklist'],
+      sfSession,
       send
     );
   });
