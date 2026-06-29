@@ -29,9 +29,150 @@ ${ragContext}
     : '';
 }
 
-function buildRunbookPrompt(form, ragContext = '') {
+// --- Phase 1 agent skills ---
+// Each analytical skill (1-5) reads its slice of the form and produces
+// a focused considerations block. Skill 6 ("Review & Compile") is the
+// existing 3-doc generation, seeded with the analyses below.
+
+export const SKILLS = [
+  {
+    id: 'client_info',
+    name: 'Client Info',
+    fields: ['clientName', 'targetMmp', 'industry', 'primaryMarket'],
+    focus:
+      'Surface industry-specific event taxonomy expectations, regional data residency or regulatory considerations, and how the target MMP commonly serves this client profile.',
+  },
+  {
+    id: 'sdk_setup',
+    name: 'Mobile SDK Setup',
+    fields: ['platforms', 'currentMmp', 'attributionModel'],
+    focus:
+      'Surface per-platform SDK considerations, migration-specific gotchas if moving from another MMP, and SDK configuration implications of the chosen attribution model.',
+  },
+  {
+    id: 'integration_type',
+    name: 'Integration Type',
+    fields: ['integrationMethods', 'dataExportMethods', 'eventTrackingMethod'],
+    focus:
+      'Surface architectural tradeoffs of the chosen integration methods, export-method coupling, and SDK-vs-S2S event tracking implications.',
+  },
+  {
+    id: 'tech_env',
+    name: 'Technical Environment',
+    fields: ['backendLanguage', 'hasDataWarehouse', 'usesCdp', 'cdpName', 'authMethod'],
+    focus:
+      'Surface backend-language SDK availability, warehouse landing patterns, CDP coexistence considerations, and auth-method implications for postbacks and exports.',
+  },
+  {
+    id: 'timeline',
+    name: 'Go-Live Timeline',
+    fields: ['targetGoLiveDate', 'onboardingUrgency'],
+    focus:
+      'Surface timeline feasibility given the stack complexity, recommend a phased rollout if appropriate, and call out the risk areas most likely to slip the date.',
+  },
+];
+
+const SKILL_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are a section analyst in an MMP onboarding agent. You receive a slice of client information for one section of the onboarding plan and produce a focused, technical analysis of that slice.
+
+Output rules:
+- 120-220 words of plain prose, no markdown headers, no bullet lists.
+- Audience: senior integrations engineers and solutions engineers.
+- Surface considerations, risks, defaults, platform-specific quirks. Do not restate the input verbatim.
+- No preamble ("Here is the analysis...") and no closing summary.
+- Do not write the runbook, FAQ, or checklist itself — your output is intermediate context for a downstream compilation step.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+function buildSkillUserPrompt(skill, form) {
+  const slice = Object.fromEntries(skill.fields.map((f) => [f, form[f]]));
+  const platform = getPlatform(form);
+  return `Section: ${skill.name}
+Target MMP: ${platform}
+${getMigrationNote(form).trim()}
+
+Client slice:
+${JSON.stringify(slice, null, 2)}
+
+Focus: ${skill.focus}
+
+Produce the focused analysis now.`;
+}
+
+function buildAnalysisBlock(skillOutputs) {
+  if (!skillOutputs || Object.keys(skillOutputs).length === 0) return '';
+  const sections = SKILLS.filter((s) => skillOutputs[s.id])
+    .map((s) => `### ${s.name} considerations\n${skillOutputs[s.id].trim()}`)
+    .join('\n\n');
+  if (!sections) return '';
+  return `\nThe agent's section analysts produced the following considerations. Treat these as authoritative context — weave the relevant points into the document, do not contradict them:
+
+${sections}
+
+---\n`;
+}
+
+export { SKILL_SYSTEM_BLOCK, buildSkillUserPrompt, buildAnalysisBlock };
+
+const EXPORT_METHOD_HINTS = {
+  Snowflake: `Snowflake export setup defaults:
+- Use a storage integration object backed by an IAM role; do not embed access keys in stages or DDL.
+- Create an external stage (S3 or GCS) and load with COPY INTO using FILE_FORMAT (TYPE = PARQUET preferred, or CSV with FIELD_OPTIONALLY_ENCLOSED_BY = '"') and MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE.
+- For the first integration, prefer hourly file-based COPY over Snowpipe — it is simpler to debug and supports backfills cleanly.
+- Land raw events in a RAW schema, transform into MODELED with dbt or a scheduled task. Cluster by event_date.
+- Grant the loader role USAGE on the warehouse, USAGE on the database/schema, and INSERT on target tables only.`,
+
+  BigQuery: `BigQuery export setup defaults:
+- Use the Data Transfer Service (DTS) for scheduled GCS → BQ loads. Native MMP → BQ connectors exist for some platforms; use them when available.
+- The destination dataset's location must match the source GCS bucket region. Multi-region is acceptable but increases cost.
+- Authenticate with a service account; grant roles/bigquery.dataEditor on the dataset and roles/storage.objectViewer on the source bucket. Do not use user credentials.
+- Partition by ingestion-time or by an event_date column; cluster on user_id / install_id for cost control on common query shapes.
+- For low-latency needs use streaming inserts (insertAll), but expect higher cost and a 90-minute streaming buffer before partition pruning takes effect.`,
+
+  S3: `S3 export setup defaults:
+- Use IAM role assumption with an external ID, not long-lived access keys, for the MMP-to-bucket trust relationship.
+- Enable bucket versioning and a 30-day non-current-version lifecycle policy so accidentally-overwritten exports can be recovered.
+- Enable default encryption (SSE-S3 minimum; SSE-KMS if compliance requires customer-managed keys).
+- Use a prefix convention like s3://<bucket>/<env>/<source>/dt=YYYY-MM-DD/hh=HH/ so downstream consumers can partition-prune.
+- Set a bucket policy denying any request without aws:SecureTransport=true.`,
+
+  SFTP: `SFTP export setup defaults:
+- ed25519 key authentication only; reject password auth at the server config level.
+- One SFTP user per environment (prod, staging); chroot each user to its own home directory.
+- Convention: drop new files in /inbound/ as <filename>.part, atomically rename to <filename> when the upload completes, then move processed files to /archive/YYYY/MM/DD/.
+- Retain processed files 7 days, then delete via cron. Monitor /inbound/ depth and alert if files older than 1 hour remain.
+- Whitelist the MMP's source IPs at the firewall; do not expose SFTP to the public internet.`,
+
+  'API Pull': `API Pull export setup defaults:
+- Authenticate per request, not per session. Rotate the API key per environment; never share keys across prod and non-prod.
+- Paginate by opaque cursor or by (start_time, end_time) windows — never by offset. Page size 1000–5000 events.
+- Implement exponential backoff with jitter on 429 and 5xx; respect Retry-After when present. Cap retries at 5 attempts per page.
+- Make pulls idempotent: dedupe on a stable event_id at the warehouse, not at the puller, so reprocessing a window is safe.
+- Run pulls on a schedule with a watermark stored in your warehouse so the next run resumes from the correct cursor after a failure.`,
+};
+
+const WAREHOUSE_HINT = `Warehouse-present defaults:
+- Treat the MMP export as the source of truth for raw events; do not transform inside the MMP. Land raw, transform in the warehouse.
+- Stage in a RAW schema (e.g. RAW.MMP_EVENTS) with the same column shape as the export file. Apply transformations into MODELED / MART schemas via dbt or scheduled queries.
+- Date-partition raw tables by event_date for query cost and retention control. Set a retention policy (e.g. 90 days raw, indefinite modeled).
+- Add a freshness check (max(event_date) > now() - interval '2 hours') and alert when it fires — this catches broken exports faster than the MMP's own monitoring.`;
+
+function buildExportHintsBlock(form) {
+  const methods = Array.isArray(form.dataExportMethods) ? form.dataExportMethods : [];
+  const hints = methods
+    .map((m) => EXPORT_METHOD_HINTS[m])
+    .filter(Boolean);
+  if (form.hasDataWarehouse) hints.push(WAREHOUSE_HINT);
+  if (hints.length === 0) return '';
+  return `\nApply these operational defaults in the Data Export Setup section unless the client's stack contradicts them:\n\n${hints.join('\n\n')}\n\n---\n`;
+}
+
+function buildRunbookPrompt(form, ragContext = '', skillOutputs = null) {
   const platform = getPlatform(form);
   const ragSection = buildRagSection(ragContext);
+  const exportHints = buildExportHintsBlock(form);
+  const analysisBlock = buildAnalysisBlock(skillOutputs);
 
   const clientDetailsBlock = `Generate an Integration Runbook for the following client.
 ${getDocSourceNote(form)}
@@ -55,7 +196,7 @@ Client details:
 - Urgency: ${form.onboardingUrgency}${getMigrationNote(form)}`;
 
   return `${clientDetailsBlock}
-${ragSection}
+${ragSection}${exportHints}${analysisBlock}
 All steps, SDK references, dashboard URLs, and terminology must be specific to ${platform}. Do not reference other MMPs unless comparing during migration.
 
 Structure the runbook with these sections:
@@ -72,9 +213,10 @@ Use markdown formatting with clear headings. Be specific to their tech stack, in
 Generate the Runbook now.`;
 }
 
-function buildFaqPrompt(form, ragContext = '') {
+function buildFaqPrompt(form, ragContext = '', skillOutputs = null) {
   const platform = getPlatform(form);
   const ragSection = buildRagSection(ragContext);
+  const analysisBlock = buildAnalysisBlock(skillOutputs);
 
   const clientDetailsBlock = `Generate a FAQ Document for the following client.
 ${getDocSourceNote(form)}
@@ -94,7 +236,7 @@ Client details:
 - Auth Method: ${form.authMethod}${getMigrationNote(form)}`;
 
   return `${clientDetailsBlock}
-${ragSection}
+${ragSection}${analysisBlock}
 Generate 12-15 questions a technical client team would realistically ask about ${platform} SDK setup, attribution logic, postback delays, data discrepancies, dashboard access, and ${formatList(form.dataExportMethods)} data delivery.
 
 Answer each FAQ concisely and accurately using ${platform}-specific terminology. Format as markdown with ### for each question and the answer below it.
@@ -102,11 +244,13 @@ Answer each FAQ concisely and accurately using ${platform}-specific terminology.
 Generate the FAQ now.`;
 }
 
-function buildChecklistPrompt(form, ragContext = '') {
+function buildChecklistPrompt(form, ragContext = '', skillOutputs = null) {
   const platform = getPlatform(form);
   const hasIos = form.platforms?.includes('iOS');
   const skadSection = hasIos ? '- SKAdNetwork Tests' : '';
   const ragSection = buildRagSection(ragContext);
+  const exportHints = buildExportHintsBlock(form);
+  const analysisBlock = buildAnalysisBlock(skillOutputs);
 
   const clientDetailsBlock = `Generate a Test Checklist for the following client.
 ${getDocSourceNote(form)}
@@ -120,7 +264,7 @@ Client details:
 - Event Tracking: ${form.eventTrackingMethod}${getMigrationNote(form)}`;
 
   return `${clientDetailsBlock}
-${ragSection}
+${ragSection}${exportHints}${analysisBlock}
 All test steps must reference ${platform} SDK behavior, dashboards, and validation tools.
 
 Format as a checklist with these sections:

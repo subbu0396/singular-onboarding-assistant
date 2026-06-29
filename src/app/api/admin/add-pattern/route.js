@@ -23,6 +23,13 @@ export async function POST(req) {
     return Response.json({ error: 'VOYAGE_API_KEY not configured' }, { status: 500 });
   }
 
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    return Response.json(
+      { error: 'SUPABASE_URL and SUPABASE_SERVICE_KEY must be configured' },
+      { status: 500 }
+    );
+  }
+
   const embedding = await embedText(`${platform} ${category} ${title} ${content}`);
 
   const { createClient } = await import('@supabase/supabase-js');

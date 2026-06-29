@@ -222,6 +222,9 @@ export function validateSection(sectionIndex, formData) {
     if (!formData.clientName?.trim()) {
       newErrors.clientName = 'Client name is required';
     }
+    if (!formData.targetMmp) {
+      newErrors.targetMmp = 'Please select a target MMP platform';
+    }
     if (!formData.industry || formData.industry === 'Select...') {
       newErrors.industry = 'Please select an industry';
     }
@@ -278,24 +281,3 @@ export function validateSection(sectionIndex, formData) {
   return newErrors;
 }
 
-export function validateForm(form) {
-  const errors = [];
-
-  if (!form.clientName?.trim()) errors.push('Client Name is required');
-  if (!form.targetMmp) errors.push('Target MMP Platform is required');
-  if (!form.industry) errors.push('Industry is required');
-  if (!form.primaryMarket) errors.push('Primary Market is required');
-  if (!form.platforms?.length) errors.push('At least one platform is required');
-  if (!form.currentMmp) errors.push('Current MMP is required');
-  if (!form.attributionModel) errors.push('Attribution model is required');
-  if (!form.integrationMethods?.length) errors.push('At least one integration method is required');
-  if (!form.dataExportMethods?.length) errors.push('At least one data export method is required');
-  if (!form.eventTrackingMethod) errors.push('Event tracking method is required');
-  if (!form.backendLanguage) errors.push('Backend language is required');
-  if (!form.authMethod) errors.push('Authentication method is required');
-  if (!form.targetGoLiveDate) errors.push('Target go-live date is required');
-  if (!form.onboardingUrgency) errors.push('Onboarding urgency is required');
-  if (form.usesCdp && !form.cdpName?.trim()) errors.push('CDP name is required when CDP is enabled');
-
-  return errors;
-}
