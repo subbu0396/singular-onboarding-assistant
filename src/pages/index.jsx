@@ -1,10 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
-import SalesforceConnect from '@/components/SalesforceConnect';
-import AtlassianConnect from '@/components/AtlassianConnect';
-import GoogleCalendarConnect from '@/components/GoogleCalendarConnect';
-import GitHubConnect from '@/components/GitHubConnect';
+import IntegrationsMenu from '@/components/IntegrationsMenu';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -323,12 +320,7 @@ export default function Home() {
               <p className="truncate text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
-            <SalesforceConnect />
-            <AtlassianConnect />
-            <GoogleCalendarConnect />
-            <GitHubConnect />
-          </div>
+          <IntegrationsMenu />
         </div>
       </header>
 
