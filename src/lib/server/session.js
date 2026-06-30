@@ -15,6 +15,11 @@ const SF_SESSION_COOKIE = 'sf_session';
 const SF_STATE_COOKIE = 'sf_oauth_state';
 const ATL_SESSION_COOKIE = 'atl_session';
 const ATL_STATE_COOKIE = 'atl_oauth_state';
+const ATL_SESSION_COUNT_COOKIE = 'atl_session_c';
+const ATL_SESSION_CHUNK_PREFIX = 'atl_session_';
+// Browsers reject cookies whose name+value+attrs exceed ~4096 bytes.
+const MAX_COOKIE_VALUE_CHARS = 3600;
+const MAX_ATL_SESSION_CHUNKS = 10;
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const STATE_MAX_AGE_SECONDS = 10 * 60; // 10 minutes
 
@@ -124,7 +129,18 @@ function cookieAttrs(maxAgeSeconds) {
   return attrs.join('; ');
 }
 
-async function readCookieJwt(req, name) {
+function parseCookieHeader(header, name) {
+  if (!header) return null;
+  for (const segment of header.split(';')) {
+    const idx = segment.indexOf('=');
+    if (idx === -1) continue;
+    const key = segment.slice(0, idx).trim();
+    if (key === name) return segment.slice(idx + 1).trim();
+  }
+  return null;
+}
+
+async function readRawCookieValue(req, name) {
   let cookie = req?.cookies?.get?.(name)?.value;
   if (!cookie) {
     try {
@@ -135,12 +151,45 @@ async function readCookieJwt(req, name) {
       // cookies() unavailable outside a request context
     }
   }
+  if (!cookie) {
+    cookie = parseCookieHeader(req?.headers?.get?.('cookie'), name);
+  }
+  return cookie || null;
+}
+
+async function readCookieJwt(req, name) {
+  const cookie = await readRawCookieValue(req, name);
   if (!cookie) return null;
   try {
     return await decrypt(cookie);
   } catch {
     return null;
   }
+}
+
+async function readAtlassianSessionJwt(req) {
+  const single = await readRawCookieValue(req, ATL_SESSION_COOKIE);
+  if (single) return single;
+
+  const countStr = await readRawCookieValue(req, ATL_SESSION_COUNT_COOKIE);
+  const count = Number(countStr);
+  if (!count || count < 1 || count > MAX_ATL_SESSION_CHUNKS) return null;
+
+  let jwt = '';
+  for (let i = 0; i < count; i++) {
+    const chunk = await readRawCookieValue(req, `${ATL_SESSION_CHUNK_PREFIX}${i}`);
+    if (!chunk) return null;
+    jwt += chunk;
+  }
+  return jwt;
+}
+
+function buildClearAtlassianChunkCookies() {
+  const cookies = [buildClearCookieFor(ATL_SESSION_COUNT_COOKIE)];
+  for (let i = 0; i < MAX_ATL_SESSION_CHUNKS; i++) {
+    cookies.push(buildClearCookieFor(`${ATL_SESSION_CHUNK_PREFIX}${i}`));
+  }
+  return cookies;
 }
 
 async function buildSessionCookieFor(name, payload) {
@@ -212,15 +261,67 @@ export function buildClearStateCookie() {
 //   }
 
 export function readAtlassianSession(req) {
-  return readCookieJwt(req, ATL_SESSION_COOKIE);
+  return readAtlassianSessionPayload(req);
+}
+
+async function readAtlassianSessionPayload(req) {
+  const jwt = await readAtlassianSessionJwt(req);
+  if (!jwt) return null;
+  try {
+    return await decrypt(jwt);
+  } catch {
+    return null;
+  }
+}
+
+export async function buildAtlassianSessionCookies(payload) {
+  const jwt = await encrypt(payload, SESSION_MAX_AGE_SECONDS);
+  const cookies = [];
+
+  if (jwt.length <= MAX_COOKIE_VALUE_CHARS) {
+    cookies.push(`${ATL_SESSION_COOKIE}=${jwt}; ${cookieAttrs(SESSION_MAX_AGE_SECONDS)}`);
+    cookies.push(...buildClearAtlassianChunkCookies());
+    return cookies;
+  }
+
+  const chunks = [];
+  for (let i = 0; i < jwt.length; i += MAX_COOKIE_VALUE_CHARS) {
+    chunks.push(jwt.slice(i, i + MAX_COOKIE_VALUE_CHARS));
+  }
+
+  if (chunks.length > MAX_ATL_SESSION_CHUNKS) {
+    throw new Error(
+      `Atlassian session cookie exceeds ${MAX_ATL_SESSION_CHUNKS} chunks — token payload too large`
+    );
+  }
+
+  cookies.push(`${ATL_SESSION_COOKIE}=; ${cookieAttrs(0)}`);
+  chunks.forEach((chunk, i) => {
+    cookies.push(
+      `${ATL_SESSION_CHUNK_PREFIX}${i}=${chunk}; ${cookieAttrs(SESSION_MAX_AGE_SECONDS)}`
+    );
+  });
+  cookies.push(
+    `${ATL_SESSION_COUNT_COOKIE}=${chunks.length}; ${cookieAttrs(SESSION_MAX_AGE_SECONDS)}`
+  );
+  for (let i = chunks.length; i < MAX_ATL_SESSION_CHUNKS; i++) {
+    cookies.push(`${ATL_SESSION_CHUNK_PREFIX}${i}=; ${cookieAttrs(0)}`);
+  }
+
+  return cookies;
 }
 
 export async function buildAtlassianSessionCookie(payload) {
-  return buildSessionCookieFor(ATL_SESSION_COOKIE, payload);
+  const cookies = await buildAtlassianSessionCookies(payload);
+  return cookies[0];
 }
 
 export function buildClearAtlassianSessionCookie() {
   return buildClearCookieFor(ATL_SESSION_COOKIE);
+}
+
+export function buildClearAtlassianSessionCookies() {
+  return [buildClearAtlassianSessionCookie(), ...buildClearAtlassianChunkCookies()];
 }
 
 export function buildAtlassianStateCookie(state) {

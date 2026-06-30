@@ -7,10 +7,9 @@ export async function GET(req) {
   if (!session) return Response.json({ connected: false });
   return Response.json({
     connected: true,
-    siteUrl: session.site_url || null,
+    siteUrl: session.cloud_id || null,
     cloudId: session.cloud_id || null,
     identity: session.identity || null,
-    issuedAt: session.issued_at,
     expiresAt: session.expires_at,
   });
 }

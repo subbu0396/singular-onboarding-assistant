@@ -137,14 +137,14 @@ export async function fetchIdentity(accessToken) {
 export function buildSessionFromTokenResponse(token, identity, resources) {
   const now = Date.now();
   const primary = resources?.[0] || null;
+  const label =
+    identity?.name || identity?.email || primary?.name || primary?.url || null;
   return {
     access_token: token.access_token,
     refresh_token: token.refresh_token || null,
-    issued_at: now,
     expires_at: now + (Number(token.expires_in) || 3600) * 1000,
     cloud_id: primary?.id || null,
-    site_url: primary?.url || null,
-    identity,
+    identity: label ? { name: label } : null,
   };
 }
 
@@ -176,9 +176,7 @@ export async function ensureFreshAtlassianSession(session) {
     ...session,
     access_token: refreshed.access_token,
     refresh_token: refreshed.refresh_token || session.refresh_token,
-    issued_at: now,
     expires_at: now + (Number(refreshed.expires_in) || 3600) * 1000,
-    scope: refreshed.scope || session.scope,
   };
   return { session: next, refreshedSession: next };
 }

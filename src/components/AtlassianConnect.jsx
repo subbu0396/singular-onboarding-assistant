@@ -8,7 +8,9 @@ const ERROR_MESSAGES = {
     'Token exchange failed — add this callback URL to your Atlassian app: /api/auth/atlassian/callback',
   missing_code_or_state: 'OAuth callback missing code or state — try again.',
   session_not_saved:
-    'OAuth succeeded but the session cookie was not saved — check SESSION_SECRET on Vercel.',
+    'OAuth succeeded but the session cookie was not saved — try disconnecting and connecting again after the latest deploy.',
+  session_cookie_too_large:
+    'Atlassian tokens are too large for a single browser cookie — contact support if this persists after reconnecting.',
 };
 
 export default function AtlassianConnect() {
@@ -49,12 +51,13 @@ export default function AtlassianConnect() {
     }
 
     const load = async () => {
-      const data = await refresh();
+      let data = await refresh();
       if (justConnected && !data?.connected) {
-        // Cookie can land a tick after navigation — retry once.
-        await new Promise((r) => setTimeout(r, 400));
-        const retry = await refresh();
-        if (!retry?.connected) {
+        for (let attempt = 0; attempt < 3 && !data?.connected; attempt++) {
+          await new Promise((r) => setTimeout(r, 400));
+          data = await refresh();
+        }
+        if (!data?.connected) {
           setAuthError((prev) => prev || 'session_not_saved');
         }
       }

@@ -1,14 +1,12 @@
 export const runtime = 'edge';
 
-import { buildClearAtlassianSessionCookie } from '@/lib/server/session';
+import { buildClearAtlassianSessionCookies } from '@/lib/server/session';
 
 export async function POST() {
-  return Response.json(
-    { ok: true },
-    {
-      headers: {
-        'Set-Cookie': buildClearAtlassianSessionCookie(),
-      },
-    }
-  );
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  for (const cookie of buildClearAtlassianSessionCookies()) {
+    headers.append('Set-Cookie', cookie);
+  }
+
+  return new Response(JSON.stringify({ ok: true }), { status: 200, headers });
 }

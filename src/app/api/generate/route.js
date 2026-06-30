@@ -27,7 +27,7 @@ import {
 import {
   readSession,
   readAtlassianSession,
-  buildAtlassianSessionCookie,
+  buildAtlassianSessionCookies,
 } from '@/lib/server/session';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
@@ -622,7 +622,9 @@ export async function POST(req) {
   // Headers we may append refreshed-session Set-Cookies onto.
   const extraHeaders = new Headers(SSE_HEADERS);
   if (atlRefreshed) {
-    extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(atlRefreshed));
+    for (const cookie of await buildAtlassianSessionCookies(atlRefreshed)) {
+      extraHeaders.append('Set-Cookie', cookie);
+    }
   }
 
   // Single-doc (regenerate) path — runs the full skill pipeline but only

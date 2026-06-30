@@ -1,7 +1,7 @@
 export const runtime = 'edge';
 
 import {
-  buildAtlassianSessionCookie,
+  buildAtlassianSessionCookies,
   buildClearAtlassianStateCookie,
   readAtlassianStateCookie,
 } from '@/lib/server/session';
@@ -57,13 +57,20 @@ async function handleCallback(req) {
   ]);
 
   const sessionPayload = buildSessionFromTokenResponse(token, identity, resources);
-  const sessionCookie = await buildAtlassianSessionCookie(sessionPayload);
+
+  let sessionCookies;
+  try {
+    sessionCookies = await buildAtlassianSessionCookies(sessionPayload);
+  } catch (err) {
+    console.error('Atlassian session cookie build failed', err);
+    return errorRedirect(req, 'session_cookie_too_large');
+  }
 
   const home = new URL('/', req.url);
   home.searchParams.set('atl_connected', '1');
 
   return redirectWithCookies(home.toString(), [
-    sessionCookie,
+    ...sessionCookies,
     buildClearAtlassianStateCookie(),
   ]);
 }
