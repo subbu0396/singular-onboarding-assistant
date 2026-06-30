@@ -295,8 +295,6 @@ async function runSkill4McpAgent(form, atlAccessToken, apiKey, send) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SKILL4_MCP_TIMEOUT_MS);
-    const startedAt = Date.now();
-    console.log('Skill 4 MCP call starting; tokenLen=', atlAccessToken?.length, 'mcpUrl=', getMcpUrl());
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal: controller.signal,
@@ -323,7 +321,6 @@ async function runSkill4McpAgent(form, atlAccessToken, apiKey, send) {
       }),
     });
     clearTimeout(timeout);
-    console.log('Skill 4 MCP call returned after', Date.now() - startedAt, 'ms; status=', response.status);
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');

@@ -136,6 +136,8 @@ If you want Skill 4's Technical Environment analysis to pull from real Confluenc
 
 The MCP-server endpoints and discovery URLs can be overridden via `ATLASSIAN_MCP_URL`, `ATLASSIAN_MCP_AUTHORIZATION_ENDPOINT`, `ATLASSIAN_MCP_TOKEN_ENDPOINT`, `ATLASSIAN_MCP_REGISTRATION_ENDPOINT` if Atlassian moves them.
 
+**Known limitation on Vercel:** In practice, the Anthropic MCP connector's call to the Atlassian Rovo MCP server exceeds Vercel's Edge runtime budget (we've observed >50s with no response, against a 60s edge cap). The Skill 4 fetch is wrapped in a 50s `AbortController` and falls back to the static-prompt path on timeout — so onboarding always completes, but the live Confluence integration doesn't actually exercise the MCP connector in the deployed app. The full DCR + PKCE + MCP-connector wiring is intact and visible in [`src/lib/server/atlassian.js`](src/lib/server/atlassian.js) and [`src/app/api/generate/route.js`](src/app/api/generate/route.js); it should succeed in environments without an aggressive edge-function timeout (e.g., a long-lived Node server). Removing the timeout, raising `maxDuration` on `/api/generate`, or moving the route off Edge runtime would let the call complete on infrastructure that supports it.
+
 ### Seeding the RAG knowledge base (optional)
 
 The RAG layer is a no-op if the Supabase + Voyage env vars aren't set — generations just don't get the pattern injection. To populate it:
