@@ -36,7 +36,7 @@ const MCP_BETA = 'mcp-client-2025-11-20';
 const ATLASSIAN_MCP_SERVER_NAME = 'atlassian';
 // Cap the Skill 4 MCP call so we surface a fallback message inside Vercel's
 // 60s edge budget instead of getting killed by the runtime timeout.
-const SKILL4_MCP_TIMEOUT_MS = 25000;
+const SKILL4_MCP_TIMEOUT_MS = 50000;
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -295,6 +295,8 @@ async function runSkill4McpAgent(form, atlAccessToken, apiKey, send) {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), SKILL4_MCP_TIMEOUT_MS);
+    const startedAt = Date.now();
+    console.log('Skill 4 MCP call starting; tokenLen=', atlAccessToken?.length, 'mcpUrl=', getMcpUrl());
     response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       signal: controller.signal,
@@ -321,6 +323,7 @@ async function runSkill4McpAgent(form, atlAccessToken, apiKey, send) {
       }),
     });
     clearTimeout(timeout);
+    console.log('Skill 4 MCP call returned after', Date.now() - startedAt, 'ms; status=', response.status);
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
