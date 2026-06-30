@@ -399,6 +399,22 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
               options={URGENCY_OPTIONS}
               error={errors.urgency}
             />
+            <div id="seAvailabilityNotes">
+              <label className="form-label" htmlFor="se-availability-notes-input">
+                Your availability for this onboarding{' '}
+                <span className="text-xs font-normal text-slate-500">(optional)</span>
+              </label>
+              <textarea
+                id="se-availability-notes-input"
+                className="form-input min-h-[88px] resize-y"
+                placeholder="e.g. Free for kickoff Tue/Thu 10–12 IST next 2 weeks; on PTO 5–9 Aug; prefer Wed for cutover."
+                value={form.seAvailabilityNotes}
+                onChange={(e) => update('seAvailabilityNotes', e.target.value)}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Skill 5 uses this alongside any connected calendar to ground the timeline analysis in your real availability.
+              </p>
+            </div>
           </div>
         );
 
