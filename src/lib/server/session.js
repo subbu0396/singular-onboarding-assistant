@@ -1,27 +1,20 @@
-// JWE-encrypted cookie session for per-SE Salesforce OAuth tokens.
+// JWE-encrypted cookie sessions for per-SE OAuth tokens.
 //
-// Sessions are stored in a single httpOnly + secure + sameSite=lax cookie
-// encrypted with AES-256-GCM via jose. The server reads/writes them on the
-// edge runtime; the browser never sees the plaintext tokens.
+// Two providers share the same encryption + cookie machinery:
+//   - Salesforce  → sf_session  / sf_oauth_state   (Phase 2)
+//   - Atlassian   → atl_session / atl_oauth_state  (Phase 3 — Confluence MCP)
 //
-// Cookie shape (JWE payload):
-//   {
-//     access_token:   string,
-//     refresh_token:  string,
-//     instance_url:   string,   // e.g. https://yourname.develop.my.salesforce.com
-//     issued_at:      number,   // unix ms
-//     expires_at?:    number,   // unix ms — if known
-//     identity?:      { name, email, user_id }
-//   }
-//
-// Two cookies are used:
-//   - SF_SESSION: long-lived (7 days), holds the encrypted tokens
-//   - SF_OAUTH_STATE: short-lived (10 min), CSRF state for the OAuth round trip
+// Sessions are stored in a single httpOnly + sameSite=lax cookie encrypted
+// with AES-256-GCM via jose. The server reads/writes them on the edge
+// runtime; the browser never sees the plaintext tokens. Payload shape is
+// provider-specific (Salesforce has instance_url; Atlassian has cloud_id).
 
 import { EncryptJWT, jwtDecrypt, base64url } from 'jose';
 
-const SESSION_COOKIE = 'sf_session';
-const STATE_COOKIE = 'sf_oauth_state';
+const SF_SESSION_COOKIE = 'sf_session';
+const SF_STATE_COOKIE = 'sf_oauth_state';
+const ATL_SESSION_COOKIE = 'atl_session';
+const ATL_STATE_COOKIE = 'atl_oauth_state';
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const STATE_MAX_AGE_SECONDS = 10 * 60; // 10 minutes
 
@@ -44,6 +37,14 @@ function decodeBase64ToBytes(str) {
   return bytes;
 }
 
+function decodeHexToBytes(str) {
+  const bytes = new Uint8Array(str.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(str.substr(i * 2, 2), 16);
+  }
+  return bytes;
+}
+
 function getEncryptionKey() {
   if (cachedKey) return cachedKey;
   const secret = process.env.SESSION_SECRET;
@@ -53,18 +54,42 @@ function getEncryptionKey() {
     );
   }
 
+  // Aggressive cleanup — strip all whitespace and surrounding quotes that
+  // sometimes survive a Vercel env-var paste from a terminal.
+  const cleaned = secret
+    .replace(/\s+/g, '')
+    .replace(/^['"`]+|['"`]+$/g, '');
+
   let keyBytes;
-  try {
-    keyBytes = decodeBase64ToBytes(secret.trim());
-  } catch {
+  let decodeError = null;
+
+  // Try hex first if it looks like hex (handles `openssl rand -hex 32`).
+  if (/^[0-9a-fA-F]{64}$/.test(cleaned)) {
+    try {
+      keyBytes = decodeHexToBytes(cleaned);
+    } catch (err) {
+      decodeError = err;
+    }
+  }
+
+  // Otherwise try base64 / base64url.
+  if (!keyBytes) {
+    try {
+      keyBytes = decodeBase64ToBytes(cleaned);
+    } catch (err) {
+      decodeError = err;
+    }
+  }
+
+  if (!keyBytes) {
     throw new Error(
-      'SESSION_SECRET could not be decoded as base64. Generate with `node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))"`.'
+      `SESSION_SECRET could not be decoded (raw length: ${secret.length}, cleaned length: ${cleaned.length}, error: ${decodeError?.message || decodeError}). Regenerate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))" — paste the entire output with no quotes and no extra whitespace.`
     );
   }
 
   if (keyBytes.length !== 32) {
     throw new Error(
-      `SESSION_SECRET must decode to exactly 32 bytes (got ${keyBytes.length}). Re-generate with \`node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"\`.`
+      `SESSION_SECRET must decode to exactly 32 bytes (got ${keyBytes.length} from raw length ${secret.length}, cleaned length ${cleaned.length}). Regenerate with: node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
     );
   }
 
@@ -99,8 +124,8 @@ function cookieAttrs(maxAgeSeconds) {
   return attrs.join('; ');
 }
 
-export async function readSession(req) {
-  const cookie = req.cookies?.get?.(SESSION_COOKIE)?.value;
+async function readCookieJwt(req, name) {
+  const cookie = req.cookies?.get?.(name)?.value;
   if (!cookie) return null;
   try {
     return await decrypt(cookie);
@@ -109,33 +134,84 @@ export async function readSession(req) {
   }
 }
 
-export async function buildSessionCookie(payload) {
+async function buildSessionCookieFor(name, payload) {
   const jwt = await encrypt(payload, SESSION_MAX_AGE_SECONDS);
-  return `${SESSION_COOKIE}=${jwt}; ${cookieAttrs(SESSION_MAX_AGE_SECONDS)}`;
+  return `${name}=${jwt}; ${cookieAttrs(SESSION_MAX_AGE_SECONDS)}`;
+}
+
+async function buildStateCookieFor(name, state) {
+  const jwt = await encrypt({ state }, STATE_MAX_AGE_SECONDS);
+  return `${name}=${jwt}; ${cookieAttrs(STATE_MAX_AGE_SECONDS)}`;
+}
+
+function buildClearCookieFor(name) {
+  return `${name}=; ${cookieAttrs(0)}`;
+}
+
+// --- Salesforce session (Phase 2) ---
+
+export function readSession(req) {
+  return readCookieJwt(req, SF_SESSION_COOKIE);
+}
+
+export function buildSessionCookie(payload) {
+  return buildSessionCookieFor(SF_SESSION_COOKIE, payload);
 }
 
 export function buildClearSessionCookie() {
-  return `${SESSION_COOKIE}=; ${cookieAttrs(0)}`;
+  return buildClearCookieFor(SF_SESSION_COOKIE);
 }
 
-export async function buildStateCookie(state) {
-  const jwt = await encrypt({ state }, STATE_MAX_AGE_SECONDS);
-  return `${STATE_COOKIE}=${jwt}; ${cookieAttrs(STATE_MAX_AGE_SECONDS)}`;
+export function buildStateCookie(state) {
+  return buildStateCookieFor(SF_STATE_COOKIE, state);
 }
 
 export async function readStateCookie(req) {
-  const cookie = req.cookies?.get?.(STATE_COOKIE)?.value;
-  if (!cookie) return null;
-  try {
-    const payload = await decrypt(cookie);
-    return payload.state || null;
-  } catch {
-    return null;
-  }
+  const payload = await readCookieJwt(req, SF_STATE_COOKIE);
+  return payload?.state || null;
 }
 
 export function buildClearStateCookie() {
-  return `${STATE_COOKIE}=; ${cookieAttrs(0)}`;
+  return buildClearCookieFor(SF_STATE_COOKIE);
+}
+
+// --- Atlassian session (Phase 3 — Confluence MCP) ---
+//
+// Payload shape:
+//   {
+//     access_token:   string,
+//     refresh_token:  string | null,
+//     expires_at:     number,   // unix ms — Atlassian access tokens expire in ~1h
+//     issued_at:      number,
+//     scope:          string,
+//     cloud_id?:      string,   // for the SE's primary Atlassian site
+//     site_url?:      string,   // human-readable site URL (informational)
+//     identity?:      { name, email, account_id }
+//   }
+
+export function readAtlassianSession(req) {
+  return readCookieJwt(req, ATL_SESSION_COOKIE);
+}
+
+export function buildAtlassianSessionCookie(payload) {
+  return buildSessionCookieFor(ATL_SESSION_COOKIE, payload);
+}
+
+export function buildClearAtlassianSessionCookie() {
+  return buildClearCookieFor(ATL_SESSION_COOKIE);
+}
+
+export function buildAtlassianStateCookie(state) {
+  return buildStateCookieFor(ATL_STATE_COOKIE, state);
+}
+
+export async function readAtlassianStateCookie(req) {
+  const payload = await readCookieJwt(req, ATL_STATE_COOKIE);
+  return payload?.state || null;
+}
+
+export function buildClearAtlassianStateCookie() {
+  return buildClearCookieFor(ATL_STATE_COOKIE);
 }
 
 export function generateRandomState() {

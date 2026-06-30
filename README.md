@@ -71,6 +71,7 @@ A few PM-level decisions that shaped the build:
 - **RAG:** [Supabase](https://supabase.com/) Postgres + `pgvector` for the knowledge base, [Voyage AI](https://www.voyageai.com/) (`voyage-3-lite`, 512-dim) for embeddings
 - **OAuth session storage:** JWE-encrypted httpOnly cookies via [`jose`](https://github.com/panva/jose) (AES-256-GCM)
 - **CRM integration:** Salesforce REST API via OAuth 2.0 web-server flow
+- **Knowledge-base integration:** Atlassian Rovo Remote MCP server via Anthropic's MCP connector (`mcp-client-2025-11-20` beta), OAuth 2.0 (3LO) for the SE
 - **PDF / DOCX export:** [`jspdf`](https://github.com/parallax/jsPDF) + [`html2canvas`](https://github.com/niklasvh/html2canvas), [`html-to-docx`](https://github.com/privateOmega/html-to-docx)
 - **Deployment:** [Vercel](https://vercel.com/) — Edge runtime for API routes, automatic HTTPS, preview deployments per PR
 
@@ -121,6 +122,24 @@ If you want Skill 1's tool-using agent to actually query Salesforce instead of f
 
 The "Connect Salesforce" button in the header will then walk you through the OAuth flow.
 
+### Atlassian / Confluence MCP (optional)
+
+If you want Skill 4's Technical Environment analysis to pull from real Confluence pages via the Atlassian Rovo Remote MCP server instead of falling back to a static prompt:
+
+1. Go to [developer.atlassian.com](https://developer.atlassian.com/console/myapps/) → **Create app** → **OAuth 2.0 (3LO) integration**
+2. Set Callback URL = `http://localhost:3000/api/auth/atlassian/callback` (and your prod URL)
+3. Add the **Confluence Cloud API** to your app and grant read scopes — by default this project asks for: `read:confluence-content.summary`, `read:confluence-content.all`, `read:confluence-space.summary`, `read:confluence-user`, `search:confluence`, `read:me`, `offline_access`. Override the set via `ATLASSIAN_OAUTH_SCOPES` (space-separated) if you want to broaden (e.g. add Jira) or narrow.
+4. Copy the app's client ID and secret into `.env.local`:
+   ```env
+   ATLASSIAN_CLIENT_ID=...
+   ATLASSIAN_CLIENT_SECRET=...
+   ATLASSIAN_REDIRECT_URI=http://localhost:3000/api/auth/atlassian/callback
+   # Optional — override default MCP URL or scope set:
+   # ATLASSIAN_MCP_URL=https://mcp.atlassian.com/v1/mcp/authv2
+   # ATLASSIAN_OAUTH_SCOPES="read:confluence-content.all search:confluence offline_access"
+   ```
+5. The "Connect Atlassian" button in the header walks the SE through OAuth. After connecting, Skill 4 calls Claude with the [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector) pointed at `https://mcp.atlassian.com/v1/mcp/authv2`, passing the SE's access token. Claude picks Confluence tools (search, page fetch) based on the form's tech slice. If the call fails or Atlassian isn't connected, Skill 4 silently falls back to the static-prompt path so onboarding always completes.
+
 ### Seeding the RAG knowledge base (optional)
 
 The RAG layer is a no-op if the Supabase + Voyage env vars aren't set — generations just don't get the pattern injection. To populate it:
@@ -165,12 +184,13 @@ src/
 
 ## Status & roadmap
 
-**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline) and Phase 2 (Salesforce integration for Skill 1) are live in production.
+**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce integration for Skill 1), and Phase 3 (Confluence MCP integration for Skill 4 via Anthropic's MCP connector) are live in production.
 
 **Potential next steps** (not currently scheduled):
-- Phase 3 — graduate more skills to real tool-using agents (Confluence MCP for Skill 4 tech-environment patterns, Calendar for Skill 5 timelines)
+- Phase 4 — Calendar MCP for Skill 5 to anchor timelines to real engineering availability
 - A "Salesforce Picker" UI for fuzzy account name search instead of strict equality
 - Custom-field support in the Salesforce lookup (Platforms__c, Current_MMP__c, etc.)
+- Surface MCP page citations as clickable links in the rendered analysis
 - Output observability — surface `usage.cache_read_input_tokens` to verify prompt caching is firing
 
 ## License

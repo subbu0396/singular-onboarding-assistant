@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
 import SalesforceConnect from '@/components/SalesforceConnect';
+import AtlassianConnect from '@/components/AtlassianConnect';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -297,7 +298,10 @@ export default function Home() {
               <p className="text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
             </div>
           </div>
-          <SalesforceConnect />
+          <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-4">
+            <SalesforceConnect />
+            <AtlassianConnect />
+          </div>
         </div>
       </header>
 
