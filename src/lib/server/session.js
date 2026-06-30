@@ -139,6 +139,19 @@ async function buildSessionCookieFor(name, payload) {
   return `${name}=${jwt}; ${cookieAttrs(SESSION_MAX_AGE_SECONDS)}`;
 }
 
+export async function encryptSessionPayload(payload) {
+  return encrypt(payload, SESSION_MAX_AGE_SECONDS);
+}
+
+export async function encryptOAuthState(state) {
+  return encrypt({ state }, STATE_MAX_AGE_SECONDS);
+}
+
+export const ATL_SESSION_COOKIE_NAME = ATL_SESSION_COOKIE;
+export const ATL_STATE_COOKIE_NAME = ATL_STATE_COOKIE;
+export const SESSION_COOKIE_MAX_AGE = SESSION_MAX_AGE_SECONDS;
+export const OAUTH_STATE_MAX_AGE = STATE_MAX_AGE_SECONDS;
+
 async function buildStateCookieFor(name, state) {
   const jwt = await encrypt({ state }, STATE_MAX_AGE_SECONDS);
   return `${name}=${jwt}; ${cookieAttrs(STATE_MAX_AGE_SECONDS)}`;
@@ -193,7 +206,7 @@ export function readAtlassianSession(req) {
   return readCookieJwt(req, ATL_SESSION_COOKIE);
 }
 
-export function buildAtlassianSessionCookie(payload) {
+export async function buildAtlassianSessionCookie(payload) {
   return buildSessionCookieFor(ATL_SESSION_COOKIE, payload);
 }
 

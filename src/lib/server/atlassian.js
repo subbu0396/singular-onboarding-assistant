@@ -41,17 +41,20 @@ export function getOAuthScopes() {
 }
 
 export function isAtlassianOAuthConfigured() {
-  return Boolean(
-    process.env.ATLASSIAN_CLIENT_ID &&
-      process.env.ATLASSIAN_CLIENT_SECRET &&
-      process.env.ATLASSIAN_REDIRECT_URI
-  );
+  const clientId = process.env.ATLASSIAN_CLIENT_ID?.trim();
+  const clientSecret = process.env.ATLASSIAN_CLIENT_SECRET?.trim();
+  return Boolean(clientId && clientSecret);
+}
+
+/** Always derive from the incoming request so OAuth works on every Vercel alias. */
+export function getAtlassianRedirectUri(req) {
+  return new URL('/api/auth/atlassian/callback', req.url).toString();
 }
 
 export async function exchangeCodeForToken({ code, redirectUri }) {
-  const clientId = process.env.ATLASSIAN_CLIENT_ID;
-  const clientSecret = process.env.ATLASSIAN_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
+  const clientId = process.env.ATLASSIAN_CLIENT_ID?.trim();
+  const clientSecret = process.env.ATLASSIAN_CLIENT_SECRET?.trim();
+  if (!clientId || !clientSecret || !redirectUri) return null;
 
   const res = await fetch(`${AUTH_HOST}/oauth/token`, {
     method: 'POST',

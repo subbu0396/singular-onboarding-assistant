@@ -1,8 +1,11 @@
 export const runtime = 'edge';
 
+import { cookies } from 'next/headers';
 import {
-  buildAtlassianSessionCookie,
-  buildClearAtlassianStateCookie,
+  ATL_SESSION_COOKIE_NAME,
+  ATL_STATE_COOKIE_NAME,
+  SESSION_COOKIE_MAX_AGE,
+  encryptSessionPayload,
   readAtlassianStateCookie,
 } from '@/lib/server/session';
 import {
@@ -10,19 +13,24 @@ import {
   exchangeCodeForToken,
   fetchAccessibleResources,
   fetchIdentity,
+  getAtlassianRedirectUri,
   isAtlassianOAuthConfigured,
 } from '@/lib/server/atlassian';
 
-function errorRedirect(req, message) {
+async function clearOAuthStateCookie() {
+  const cookieStore = await cookies();
+  cookieStore.delete(ATL_STATE_COOKIE_NAME);
+}
+
+async function errorRedirect(req, message) {
   const url = new URL('/', req.url);
   url.searchParams.set('atl_error', message);
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: url.toString(),
-      'Set-Cookie': buildClearAtlassianStateCookie(),
-    },
-  });
+  return errorRedirectWithCleanup(url);
+}
+
+async function errorRedirectWithCleanup(url) {
+  await clearOAuthStateCookie();
+  return Response.redirect(url.toString(), 302);
 }
 
 async function handleCallback(req) {
@@ -31,42 +39,43 @@ async function handleCallback(req) {
   const state = url.searchParams.get('state');
   const oauthError = url.searchParams.get('error');
 
-  if (oauthError) return errorRedirect(req, `atlassian_${oauthError}`);
-  if (!code || !state) return errorRedirect(req, 'missing_code_or_state');
+  if (oauthError) return await errorRedirect(req, `atlassian_${oauthError}`);
+  if (!code || !state) return await errorRedirect(req, 'missing_code_or_state');
 
   const expectedState = await readAtlassianStateCookie(req);
   if (!expectedState || expectedState !== state) {
-    return errorRedirect(req, 'state_mismatch');
+    return await errorRedirect(req, 'state_mismatch');
   }
 
   if (!isAtlassianOAuthConfigured()) {
-    return errorRedirect(req, 'oauth_not_configured');
+    return await errorRedirect(req, 'oauth_not_configured');
   }
 
-  const redirectUri = process.env.ATLASSIAN_REDIRECT_URI;
+  const redirectUri = getAtlassianRedirectUri(req);
   const token = await exchangeCodeForToken({ code, redirectUri });
-  if (!token?.access_token) return errorRedirect(req, 'token_exchange_failed');
+  if (!token?.access_token) return await errorRedirect(req, 'token_exchange_failed');
 
-  // Best-effort identity + accessible-resources lookups for the UI badge
-  // and so we know which cloud_id to surface. Both are non-fatal.
   const [identity, resources] = await Promise.all([
     fetchIdentity(token.access_token),
     fetchAccessibleResources(token.access_token),
   ]);
 
   const sessionPayload = buildSessionFromTokenResponse(token, identity, resources);
-  const sessionCookie = await buildAtlassianSessionCookie(sessionPayload);
-  const clearStateCookie = buildClearAtlassianStateCookie();
+  const sessionJwt = await encryptSessionPayload(sessionPayload);
+
+  const cookieStore = await cookies();
+  cookieStore.set(ATL_SESSION_COOKIE_NAME, sessionJwt, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: SESSION_COOKIE_MAX_AGE,
+    path: '/',
+  });
+  cookieStore.delete(ATL_STATE_COOKIE_NAME);
 
   const home = new URL('/', req.url);
   home.searchParams.set('atl_connected', '1');
-
-  const headers = new Headers();
-  headers.append('Set-Cookie', sessionCookie);
-  headers.append('Set-Cookie', clearStateCookie);
-  headers.set('Location', home.toString());
-
-  return new Response(null, { status: 302, headers });
+  return Response.redirect(home.toString(), 302);
 }
 
 export async function GET(req) {
