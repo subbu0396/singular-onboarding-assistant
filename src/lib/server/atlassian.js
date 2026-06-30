@@ -132,51 +132,48 @@ export async function fetchIdentity(accessToken) {
 }
 
 export function buildSessionFromTokenResponse(token, identity, resources) {
-  // Keep this payload as small as possible — Atlassian access tokens are
-  // ~1.5KB JWTs and refresh tokens add another ~500B; JWE encryption adds
-  // ~33% overhead. The whole Set-Cookie value must stay under the ~4KB
-  // browser limit or the cookie is silently dropped. Drop anything that's
-  // not strictly needed for the MCP call, refresh, or the badge.
+  // Persist only the refresh token + identity. The access token is a 2KB+
+  // JWT with all 7 scopes encoded — even after JWE encryption it pushed
+  // the cookie past the browser's ~4KB per-cookie limit and the cookie
+  // was silently dropped. We refresh on-demand each time Skill 4 needs
+  // an access token (~200ms extra per invocation). Refresh tokens are
+  // opaque and small (~500B), so the cookie stays comfortably under 1KB.
   const now = Date.now();
   const primary = resources?.[0] || null;
   return {
-    access_token: token.access_token,
     refresh_token: token.refresh_token || null,
-    expires_at: now + (Number(token.expires_in) || 3600) * 1000,
-    // Trimmed identity — only the display name keeps the badge useful.
+    // Stamp when the original access_token expires so the badge can warn
+    // the user if they need to re-auth (refresh tokens themselves expire
+    // after long inactivity — Atlassian's default is ~1 year).
+    initial_expires_at: now + (Number(token.expires_in) || 3600) * 1000,
     identity_name: identity?.name || identity?.email || primary?.name || null,
   };
 }
 
-// Returns a session guaranteed to have a non-expired access token, refreshing
-// once if the stored one is within REFRESH_SKEW_MS of expiry. Returns null if
-// the session is missing/unrecoverable.
+// Mints a fresh access token from the persisted refresh token. We do this on
+// every request that needs an MCP call rather than persisting the access
+// token in the cookie (it's too large to fit alongside other fields without
+// blowing the 4KB cookie limit).
 //
-// Caller is responsible for rewriting the cookie when refreshedSession is set.
-export async function ensureFreshAtlassianSession(session) {
-  if (!session?.access_token) return { session: null, refreshedSession: null };
-
-  const expiresAt = Number(session.expires_at) || 0;
-  if (expiresAt - REFRESH_SKEW_MS > Date.now()) {
-    return { session, refreshedSession: null };
-  }
-
-  if (!session.refresh_token) {
-    // Stale and no refresh token — surface as "not connected" so Skill 4 falls back.
-    return { session: null, refreshedSession: null };
-  }
+// Returns { accessToken, refreshedSession? }:
+//   - accessToken:       null if no session or refresh failed
+//   - refreshedSession:  set when Atlassian rotated the refresh token (rare
+//                        but Atlassian's docs say it can happen) so the
+//                        caller can rewrite the cookie
+export async function getAtlassianAccessToken(session) {
+  if (!session?.refresh_token) return { accessToken: null, refreshedSession: null };
 
   const refreshed = await refreshAccessToken(session.refresh_token);
   if (!refreshed?.access_token) {
-    return { session: null, refreshedSession: null };
+    return { accessToken: null, refreshedSession: null };
   }
 
-  const now = Date.now();
-  const next = {
-    ...session,
-    access_token: refreshed.access_token,
-    refresh_token: refreshed.refresh_token || session.refresh_token,
-    expires_at: now + (Number(refreshed.expires_in) || 3600) * 1000,
-  };
-  return { session: next, refreshedSession: next };
+  // Atlassian may rotate refresh tokens — only rewrite the cookie if the
+  // refresh token actually changed.
+  const refreshedSession =
+    refreshed.refresh_token && refreshed.refresh_token !== session.refresh_token
+      ? { ...session, refresh_token: refreshed.refresh_token }
+      : null;
+
+  return { accessToken: refreshed.access_token, refreshedSession };
 }

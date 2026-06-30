@@ -18,7 +18,7 @@ import {
 } from '@/lib/server/claudeClient';
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
 import {
-  ensureFreshAtlassianSession,
+  getAtlassianAccessToken,
   getMcpUrl,
 } from '@/lib/server/atlassian';
 import {
@@ -271,7 +271,7 @@ async function runSkill1Agent(client, form, sfSession, send) {
 // Skill 4: when Atlassian is connected, run via Anthropic's MCP connector
 // against the Atlassian Rovo MCP server. Otherwise fall back to the static
 // runSkill path so onboarding still works without Atlassian set up.
-async function runSkill4McpAgent(client, form, atlSession, send) {
+async function runSkill4McpAgent(client, form, atlAccessToken, send) {
   const skillId = 'tech_env';
   send({ type: 'skill_start', skillId });
 
@@ -291,7 +291,7 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
           type: 'url',
           url: getMcpUrl(),
           name: ATLASSIAN_MCP_SERVER_NAME,
-          authorization_token: atlSession.access_token,
+          authorization_token: atlAccessToken,
         },
       ],
       tools: [{ type: 'mcp_toolset', mcp_server_name: ATLASSIAN_MCP_SERVER_NAME }],
@@ -452,7 +452,7 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
   }
 }
 
-async function runAgent(client, form, ragContext, docTypes, sfSession, atlSession, send) {
+async function runAgent(client, form, ragContext, docTypes, sfSession, atlAccessToken, send) {
   // Skills 1-5 run in parallel — no inter-skill dependencies.
   // Skill 1: Salesforce tool-using agent (Phase 2).
   // Skill 4: Confluence MCP agent (Phase 3) when Atlassian is connected;
@@ -463,8 +463,8 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         const { output } = await runSkill1Agent(client, form, sfSession, send);
         return { id: skill.id, output };
       }
-      if (skill.id === 'tech_env' && atlSession?.access_token) {
-        const mcpOutput = await runSkill4McpAgent(client, form, atlSession, send);
+      if (skill.id === 'tech_env' && atlAccessToken) {
+        const mcpOutput = await runSkill4McpAgent(client, form, atlAccessToken, send);
         if (mcpOutput) return { id: skill.id, output: mcpOutput };
         // MCP path returned null (refusal / error) — fall through to static.
       }
@@ -521,14 +521,20 @@ export async function POST(req) {
   const body = await req.json();
   const client = new Anthropic({ apiKey });
   const sfSession = await readSession(req);
-  const storedAtlSession = await readAtlassianSession(req);
-  const { session: atlSession, refreshedSession: atlRefreshed } =
-    await ensureFreshAtlassianSession(storedAtlSession);
+  const atlSession = await readAtlassianSession(req);
 
-  // Headers we may append refreshed-session Set-Cookies onto.
+  // Mint a fresh Atlassian access token from the persisted refresh token
+  // upfront (single round-trip, ~200ms). If the refresh fails — token
+  // revoked, refresh token expired — atlAccessToken stays null and Skill 4
+  // silently falls back to its static-prompt path.
+  let atlAccessToken = null;
   const extraHeaders = new Headers(SSE_HEADERS);
-  if (atlRefreshed) {
-    extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(atlRefreshed));
+  if (atlSession?.refresh_token) {
+    const { accessToken, refreshedSession } = await getAtlassianAccessToken(atlSession);
+    atlAccessToken = accessToken;
+    if (refreshedSession) {
+      extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(refreshedSession));
+    }
   }
 
   // Single-doc (regenerate) path — runs the full skill pipeline but only
@@ -550,7 +556,7 @@ export async function POST(req) {
         ragContext,
         [body.docType],
         sfSession,
-        atlSession,
+        atlAccessToken,
         send
       );
     });

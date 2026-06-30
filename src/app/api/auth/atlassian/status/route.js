@@ -8,6 +8,6 @@ export async function GET(req) {
   return Response.json({
     connected: true,
     identityName: session.identity_name || null,
-    expiresAt: session.expires_at,
+    initialExpiresAt: session.initial_expires_at || null,
   });
 }
