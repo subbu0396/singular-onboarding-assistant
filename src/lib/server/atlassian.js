@@ -142,7 +142,6 @@ export function buildSessionFromTokenResponse(token, identity, resources) {
     refresh_token: token.refresh_token || null,
     issued_at: now,
     expires_at: now + (Number(token.expires_in) || 3600) * 1000,
-    scope: token.scope || getOAuthScopes(),
     cloud_id: primary?.id || null,
     site_url: primary?.url || null,
     identity,

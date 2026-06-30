@@ -125,7 +125,16 @@ function cookieAttrs(maxAgeSeconds) {
 }
 
 async function readCookieJwt(req, name) {
-  const cookie = req.cookies?.get?.(name)?.value;
+  let cookie = req?.cookies?.get?.(name)?.value;
+  if (!cookie) {
+    try {
+      const { cookies } = await import('next/headers');
+      const cookieStore = await cookies();
+      cookie = cookieStore.get(name)?.value;
+    } catch {
+      // cookies() unavailable outside a request context
+    }
+  }
   if (!cookie) return null;
   try {
     return await decrypt(cookie);

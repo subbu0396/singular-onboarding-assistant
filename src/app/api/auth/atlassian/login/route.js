@@ -1,11 +1,8 @@
 export const runtime = 'edge';
 
-import { cookies } from 'next/headers';
 import {
-  ATL_STATE_COOKIE_NAME,
-  OAUTH_STATE_MAX_AGE,
+  buildAtlassianStateCookie,
   generateRandomState,
-  encryptOAuthState,
 } from '@/lib/server/session';
 import {
   getAtlassianRedirectUri,
@@ -29,17 +26,8 @@ export async function GET(req) {
 
     const clientId = process.env.ATLASSIAN_CLIENT_ID.trim();
     const redirectUri = getAtlassianRedirectUri(req);
-
     const state = generateRandomState();
-    const stateJwt = await encryptOAuthState(state);
-    const cookieStore = await cookies();
-    cookieStore.set(ATL_STATE_COOKIE_NAME, stateJwt, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: OAUTH_STATE_MAX_AGE,
-      path: '/',
-    });
+    const stateCookie = await buildAtlassianStateCookie(state);
 
     const authUrl = new URL(AUTH_URL);
     authUrl.searchParams.set('audience', 'api.atlassian.com');
@@ -50,7 +38,13 @@ export async function GET(req) {
     authUrl.searchParams.set('response_type', 'code');
     authUrl.searchParams.set('prompt', 'consent');
 
-    return Response.redirect(authUrl.toString(), 302);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: authUrl.toString(),
+        'Set-Cookie': stateCookie,
+      },
+    });
   } catch (err) {
     console.error('Atlassian login route error:', err);
     return Response.json(

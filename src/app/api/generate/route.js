@@ -457,8 +457,8 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
   }
 }
 
-async function runSkill(client, skill, form, send) {
-  send({ type: 'skill_start', skillId: skill.id });
+async function runSkill(client, skill, form, send, { skipLifecycle = false } = {}) {
+  if (!skipLifecycle) send({ type: 'skill_start', skillId: skill.id });
   try {
     const stream = client.messages.stream({
       model: MODEL,
@@ -494,7 +494,7 @@ async function runSkill(client, skill, form, send) {
       err instanceof Anthropic.APIError
         ? `${skill.id} skill failed (${err.status}): ${err.message}`
         : err?.message || `${skill.id} skill failed`;
-    send({ type: 'skill_error', skillId: skill.id, message });
+    if (!skipLifecycle) send({ type: 'skill_error', skillId: skill.id, message });
     return null;
   }
 }
@@ -556,7 +556,11 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
           : runSkill4ConfluenceAgent;
         const skillOutput = await runner(client, form, atlSession, send);
         if (skillOutput) return { id: skill.id, output: skillOutput };
-        // Confluence/MCP path returned null — fall through to static.
+        // Confluence path already emitted skill_start — avoid resetting tool badges.
+        return {
+          id: skill.id,
+          output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
+        };
       }
       return { id: skill.id, output: await runSkill(client, skill, form, send) };
     })
