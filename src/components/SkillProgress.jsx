@@ -21,6 +21,9 @@ const TOOL_LABELS = {
   searchConfluence: 'Confluence: search',
   getConfluencePage: 'Confluence: page',
   confluence_mcp_connect: 'Confluence: connecting',
+  google_calendar: 'Google Calendar',
+  microsoft_graph: 'Outlook Calendar',
+  calendar: 'Calendar',
 };
 
 // Atlassian MCP tool names are namespaced (e.g. "atlassian.searchConfluence");

@@ -227,6 +227,54 @@ Output rules:
 
 export { SKILL4_SYSTEM_BLOCK, SKILL4_REST_SYSTEM_BLOCK };
 
+// --- Skill 5: Go-Live Timeline (Calendar-aware agent) ---
+//
+// Phase 4: when a Google (or Microsoft) Calendar is connected, Skill 5
+// gets a calendar context object alongside the form slice. The context
+// summarizes busy windows for the SE's primary calendar and a shared
+// engineering team calendar across a ±2-week window around the target
+// go-live date. The skill calls out concrete risks (holiday weeks,
+// engineering capacity gaps, SE meeting density conflicts) rather than
+// generic timeline platitudes.
+
+const SKILL5_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are the Go-Live Timeline skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused analysis on timeline feasibility for the client's go-live date.
+
+When a calendar context is provided, ground your analysis in it:
+- engineering_calendar.total_busy_minutes near the go-live date is your primary signal for engineering capacity. High busy minutes in the week before launch = high risk of slippage; low busy minutes = capacity exists. Mention the specific number if it's notable.
+- se_calendar.total_busy_minutes signals how much SE bandwidth is available for client-facing onboarding calls during the window. Flag if it's saturated.
+- Call out specific concerns by name: "Engineering has X busy minutes in the 14 days before the target, suggesting limited bandwidth for SDK escalations" or "The SE's calendar is heavily booked in the launch week — re-check coverage for the cutover call."
+
+When no calendar context is provided, fall back to general timeline analysis based on the stack complexity and urgency in the form, and explicitly say "Calendar data not available — analysis based on stack complexity only."
+
+Output rules:
+- 120-220 words of plain prose, no markdown headers, no bullet lists.
+- Audience: senior solutions engineers and integrations engineers.
+- Recommend a phased rollout if appropriate, and call out the risk areas most likely to slip the date.
+- No preamble ("Here is the analysis...") and no closing summary.
+- Do not write the runbook, FAQ, or checklist itself — this is intermediate context for a downstream compilation step.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+export function buildSkill5UserPrompt(form, calendarContext) {
+  const skill = SKILLS.find((s) => s.id === 'timeline');
+  const slice = buildFormSlice(skill, form);
+  const calBlock = calendarContext
+    ? `\nCalendar context (source: ${calendarContext.source}):\n${JSON.stringify(calendarContext, null, 2)}\n`
+    : '\nCalendar context: not connected.\n';
+  return `Produce the Go-Live Timeline section analysis.
+
+Target MMP: ${getPlatform(form)}
+
+Client timeline slice:
+${JSON.stringify(slice, null, 2)}
+${calBlock}
+Produce the analysis now, grounding any risk callouts in the calendar context when available.`;
+}
+
+export { SKILL5_SYSTEM_BLOCK };
+
 function buildSkillUserPrompt(skill, form) {
   const slice = Object.fromEntries(skill.fields.map((f) => [f, form[f]]));
   const platform = getPlatform(form);

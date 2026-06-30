@@ -12,9 +12,11 @@ import {
   SKILL1_TOOLS,
   SKILL4_SYSTEM_BLOCK,
   SKILL4_REST_SYSTEM_BLOCK,
+  SKILL5_SYSTEM_BLOCK,
   buildSkillUserPrompt,
   buildSkill1UserPrompt,
   buildSkill4UserPrompt,
+  buildSkill5UserPrompt,
   buildFormSlice,
 } from '@/lib/server/claudeClient';
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
@@ -28,7 +30,13 @@ import {
   readSession,
   readAtlassianSession,
   buildAtlassianSessionCookies,
+  readGoogleSession,
+  buildGoogleSessionCookie,
 } from '@/lib/server/session';
+import {
+  ensureFreshGoogleSession,
+  fetchCalendarContext,
+} from '@/lib/server/googleCalendar';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
@@ -500,6 +508,81 @@ async function runSkill(client, skill, form, send, { skipLifecycle = false } = {
   }
 }
 
+// Skill 5: when a Google (or Microsoft) calendar is connected, fetch a
+// compact calendar context (engineering free/busy + SE meeting density
+// around the target go-live date) and run the timeline skill with that
+// context in the prompt. Falls back to the static runSkill path when no
+// calendar is connected or the fetch fails.
+async function runSkill5CalendarAgent(client, form, calendarContext, send) {
+  const skillId = 'timeline';
+  send({ type: 'skill_start', skillId });
+  // Surface that we hit a calendar so the UI can show a tool badge,
+  // mirroring how Skill 1 surfaces Salesforce.
+  send({
+    type: 'tool_call_start',
+    skillId,
+    toolName: calendarContext?.source || 'calendar',
+    input: { window: calendarContext?.window },
+  });
+  try {
+    const stream = client.messages.stream({
+      model: MODEL,
+      max_tokens: SKILL_MAX_TOKENS,
+      system: [SKILL5_SYSTEM_BLOCK],
+      messages: [
+        {
+          role: 'user',
+          content: buildSkill5UserPrompt(form, calendarContext),
+        },
+      ],
+    });
+
+    let output = '';
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        output += event.delta.text;
+      }
+    }
+
+    const final = await stream.finalMessage();
+    if (final.stop_reason === 'refusal') {
+      send({
+        type: 'tool_call_complete',
+        skillId,
+        toolName: calendarContext?.source || 'calendar',
+        ok: false,
+      });
+      send({ type: 'skill_error', skillId, message: 'Refused by safety filters.' });
+      return null;
+    }
+
+    send({
+      type: 'tool_call_complete',
+      skillId,
+      toolName: calendarContext?.source || 'calendar',
+      ok: true,
+    });
+    send({ type: 'skill_complete', skillId });
+    return output.trim() || null;
+  } catch (err) {
+    send({
+      type: 'tool_call_complete',
+      skillId,
+      toolName: calendarContext?.source || 'calendar',
+      ok: false,
+    });
+    const message =
+      err instanceof Anthropic.APIError
+        ? `Skill 5 calendar call failed (${err.status}): ${err.message}`
+        : err?.message || 'Skill 5 calendar call failed';
+    console.error('Skill 5 calendar error — falling back to static prompt', message);
+    return null;
+  }
+}
+
 async function streamDoc(client, docType, form, ragContext, skillOutputs, send) {
   const { builder, system } = DOC_BUILDERS[docType];
 
@@ -552,11 +635,13 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
   }
 }
 
-async function runAgent(client, form, ragContext, docTypes, sfSession, atlSession, send) {
+async function runAgent(client, form, ragContext, docTypes, sfSession, atlSession, calendarContext, send) {
   // Skills 1-5 run in parallel — no inter-skill dependencies.
   // Skill 1: Salesforce tool-using agent (Phase 2).
   // Skill 4: Confluence MCP agent (Phase 3) when Atlassian is connected;
   //          falls back to the static runSkill path when it isn't or fails.
+  // Skill 5: Calendar-aware agent (Phase 4) when Google/MS Calendar is
+  //          connected and a calendar context was successfully fetched.
   const skillResults = await Promise.all(
     SKILLS.map(async (skill) => {
       if (skill.id === 'client_info') {
@@ -570,6 +655,14 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         const skillOutput = await runner(client, form, atlSession, send);
         if (skillOutput) return { id: skill.id, output: skillOutput };
         // Confluence path already emitted skill_start — avoid resetting tool badges.
+        return {
+          id: skill.id,
+          output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
+        };
+      }
+      if (skill.id === 'timeline' && calendarContext) {
+        const skillOutput = await runSkill5CalendarAgent(client, form, calendarContext, send);
+        if (skillOutput) return { id: skill.id, output: skillOutput };
         return {
           id: skill.id,
           output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
@@ -633,12 +726,27 @@ export async function POST(req) {
   const { session: atlSession, refreshedSession: atlRefreshed } =
     await ensureFreshAtlassianSession(storedAtlSession);
 
+  // Phase 4: refresh the Google session up-front and fetch the calendar
+  // context once. The form lives on `body` directly for full generation
+  // and on `body.form` for single-doc regenerate.
+  const storedGoogleSession = await readGoogleSession(req);
+  const { session: googleSession, refreshedSession: googleRefreshed } =
+    await ensureFreshGoogleSession(storedGoogleSession);
+  const formForCalendar = body.docType && body.form ? body.form : body;
+  let calendarContext = null;
+  if (googleSession?.access_token) {
+    calendarContext = await fetchCalendarContext(googleSession, formForCalendar);
+  }
+
   // Headers we may append refreshed-session Set-Cookies onto.
   const extraHeaders = new Headers(SSE_HEADERS);
   if (atlRefreshed) {
     for (const cookie of await buildAtlassianSessionCookies(atlRefreshed)) {
       extraHeaders.append('Set-Cookie', cookie);
     }
+  }
+  if (googleRefreshed) {
+    extraHeaders.append('Set-Cookie', await buildGoogleSessionCookie(googleRefreshed));
   }
 
   // Single-doc (regenerate) path — runs the full skill pipeline but only
@@ -661,6 +769,7 @@ export async function POST(req) {
         [body.docType],
         sfSession,
         atlSession,
+        calendarContext,
         send
       );
     });

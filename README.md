@@ -140,6 +140,22 @@ If you want Skill 4's Technical Environment analysis to pull from real Confluenc
    ```
 5. The "Connect Atlassian" button in the header walks the SE through OAuth. After connecting, Skill 4 calls Claude with the [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector) pointed at `https://mcp.atlassian.com/v1/mcp/authv2`, passing the SE's access token. Claude picks Confluence tools (search, page fetch) based on the form's tech slice. If the call fails or Atlassian isn't connected, Skill 4 silently falls back to the static-prompt path so onboarding always completes.
 
+### Google Calendar (optional, Phase 4)
+
+If you want Skill 5's Go-Live Timeline analysis to factor in real engineering availability and SE meeting density around the client's target go-live date:
+
+1. In [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → **Enable APIs** → enable the **Google Calendar API**.
+2. APIs & Services → **Credentials** → **Create credentials** → **OAuth client ID** → **Web application**:
+   - Authorized redirect URIs: `http://localhost:3000/api/auth/google/callback` and every Vercel alias you deploy to (e.g. `https://singular-onboarding-assistant.vercel.app/api/auth/google/callback`)
+3. OAuth consent screen → add scopes: `openid`, `email`, `profile`, `https://www.googleapis.com/auth/calendar.readonly`.
+4. Copy the client ID and secret into `.env.local`:
+   ```env
+   GOOGLE_CLIENT_ID=...
+   GOOGLE_CLIENT_SECRET=...
+   ENGINEERING_CALENDAR_ID=eng-team@yourco.com  # shared calendar the SE has read access to
+   ```
+5. The "Connect Google Calendar" button in the header walks the SE through OAuth. After connecting, Skill 5 queries `freeBusy.query` for both the engineering calendar and the SE's primary calendar across a ±2-week window around `targetGoLiveDate`, then grounds its timeline analysis in the actual busy-minute counts ("Engineering has 2,340 busy minutes in the 14 days before the target — limited bandwidth for SDK escalations"). If no calendar is connected or the fetch fails, Skill 5 falls back to the static prompt.
+
 ### Seeding the RAG knowledge base (optional)
 
 The RAG layer is a no-op if the Supabase + Voyage env vars aren't set — generations just don't get the pattern injection. To populate it:
@@ -184,13 +200,12 @@ src/
 
 ## Status & roadmap
 
-**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce integration for Skill 1), and Phase 3 (Confluence MCP integration for Skill 4 via Anthropic's MCP connector) are live in production.
+**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), and Phase 4 (Google Calendar for Skill 5) are live in production. Microsoft Graph / Outlook Calendar will follow as a Phase 4 extension.
 
 **Potential next steps** (not currently scheduled):
-- Phase 4 — Calendar MCP for Skill 5 to anchor timelines to real engineering availability
+- Phase 4 extension — Microsoft Graph (Outlook Calendar) as a second provider for Skill 5
 - A "Salesforce Picker" UI for fuzzy account name search instead of strict equality
 - Custom-field support in the Salesforce lookup (Platforms__c, Current_MMP__c, etc.)
-- Surface MCP page citations as clickable links in the rendered analysis
 - Output observability — surface `usage.cache_read_input_tokens` to verify prompt caching is firing
 
 ## License
