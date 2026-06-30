@@ -50,11 +50,7 @@ export default function AtlassianConnect() {
   }
 
   if (status.connected) {
-    const identityName =
-      status.identity?.name ||
-      status.identity?.email ||
-      status.siteUrl ||
-      'Atlassian';
+    const identityName = status.identityName || 'Atlassian';
     return (
       <div className="flex items-center gap-2 text-xs">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-700 bg-sky-500/10 px-2.5 py-1 text-sky-300">
