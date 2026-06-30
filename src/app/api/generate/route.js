@@ -788,6 +788,7 @@ export async function POST(req) {
       ['runbook', 'faq', 'checklist'],
       sfSession,
       atlSession,
+      calendarContext,
       send
     );
   });
