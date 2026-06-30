@@ -4,6 +4,7 @@ import ResultsTabs from '@/components/ResultsTabs';
 import SalesforceConnect from '@/components/SalesforceConnect';
 import AtlassianConnect from '@/components/AtlassianConnect';
 import GoogleCalendarConnect from '@/components/GoogleCalendarConnect';
+import GitHubConnect from '@/components/GitHubConnect';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -326,6 +327,7 @@ export default function Home() {
             <SalesforceConnect />
             <AtlassianConnect />
             <GoogleCalendarConnect />
+            <GitHubConnect />
           </div>
         </div>
       </header>

@@ -10,11 +10,14 @@ import {
   SKILL_SYSTEM_BLOCK,
   SKILL1_SYSTEM_BLOCK,
   SKILL1_TOOLS,
+  SKILL2_SYSTEM_BLOCK,
+  SKILL2_TOOLS,
   SKILL4_SYSTEM_BLOCK,
   SKILL4_REST_SYSTEM_BLOCK,
   SKILL5_SYSTEM_BLOCK,
   buildSkillUserPrompt,
   buildSkill1UserPrompt,
+  buildSkill2UserPrompt,
   buildSkill4UserPrompt,
   buildSkill5UserPrompt,
   buildFormSlice,
@@ -32,17 +35,25 @@ import {
   buildAtlassianSessionCookies,
   readGoogleSession,
   buildGoogleSessionCookie,
+  readGitHubSession,
+  buildGitHubSessionCookie,
 } from '@/lib/server/session';
 import {
   ensureFreshGoogleSession,
   fetchCalendarContext,
 } from '@/lib/server/googleCalendar';
+import {
+  ensureFreshGitHubSession,
+  searchClientRepos,
+  fetchRepoManifests,
+} from '@/lib/server/github';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 6000;
 const SKILL_MAX_TOKENS = 1500;
 const SKILL1_MAX_ITERATIONS = 4;
+const SKILL2_MAX_ITERATIONS = 5;
 const MCP_BETA = 'mcp-client-2025-11-20';
 const ATLASSIAN_MCP_SERVER_NAME = 'atlassian';
 const DOC_STREAM_TIMEOUT_MS = 120_000;
@@ -469,6 +480,145 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
   }
 }
 
+// Skill 2: when GitHub is connected, run as a tool-using agent that searches
+// the SE's accessible repos by client name and fetches SDK manifests from
+// the top match. Falls back to runSkill (static prompt) when GitHub isn't
+// connected or the agent loop fails / produces no output.
+async function runSkill2GitHubAgent(client, form, githubSession, send) {
+  const skillId = 'sdk_setup';
+  send({ type: 'skill_start', skillId });
+
+  const accessToken = githubSession?.access_token;
+
+  const toolHandlers = {
+    search_github_repos: async (input) => {
+      if (!accessToken) {
+        return { items: [], _reason: 'GitHub not connected — fall back to use_form_data.' };
+      }
+      try {
+        return await searchClientRepos(accessToken, {
+          clientName: input?.clientName || form.clientName,
+        });
+      } catch (err) {
+        return { items: [], _error: err?.message || 'search failed' };
+      }
+    },
+    fetch_repo_manifests: async (input) => {
+      if (!accessToken) return { repo: input?.fullName, manifests: [], _reason: 'not connected' };
+      try {
+        return await fetchRepoManifests(accessToken, { fullName: input?.fullName });
+      } catch (err) {
+        return { repo: input?.fullName, manifests: [], _error: err?.message || 'fetch failed' };
+      }
+    },
+    use_form_data: async () =>
+      buildFormSlice(SKILLS.find((s) => s.id === skillId), form),
+  };
+
+  const messages = [{ role: 'user', content: buildSkill2UserPrompt(form) }];
+  let finalText = '';
+  let iteration = 0;
+
+  try {
+    while (iteration++ < SKILL2_MAX_ITERATIONS) {
+      const response = await client.messages.create({
+        model: MODEL,
+        max_tokens: SKILL_MAX_TOKENS,
+        system: [SKILL2_SYSTEM_BLOCK],
+        tools: SKILL2_TOOLS,
+        messages,
+      });
+
+      if (response.stop_reason === 'refusal') {
+        send({ type: 'skill_error', skillId, message: 'Refused by safety filters.' });
+        return null;
+      }
+
+      for (const block of response.content) {
+        if (block.type === 'text') finalText += block.text;
+      }
+
+      if (response.stop_reason === 'end_turn') break;
+
+      if (response.stop_reason === 'tool_use') {
+        const toolUses = response.content.filter((b) => b.type === 'tool_use');
+        messages.push({ role: 'assistant', content: response.content });
+
+        const toolResults = [];
+        for (const toolUse of toolUses) {
+          send({
+            type: 'tool_call_start',
+            skillId,
+            toolName: toolUse.name,
+            input: toolUse.input,
+          });
+
+          const handler = toolHandlers[toolUse.name];
+          if (!handler) {
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok: false,
+              message: `Unknown tool: ${toolUse.name}`,
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: unknown tool ${toolUse.name}`,
+              is_error: true,
+            });
+            continue;
+          }
+
+          try {
+            const result = await handler(toolUse.input || {});
+            // Treat a successful API call as ok=true even if it returned
+            // zero items — the UI shouldn't flag a no-results search as
+            // failed. Real failures populate `_error`.
+            const ok = !result?._error;
+            send({ type: 'tool_call_complete', skillId, toolName: toolUse.name, ok });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify(result),
+            });
+          } catch (err) {
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok: false,
+              message: err?.message || 'Tool execution failed',
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: ${err?.message || 'tool failed'}`,
+              is_error: true,
+            });
+          }
+        }
+
+        messages.push({ role: 'user', content: toolResults });
+        continue;
+      }
+
+      break;
+    }
+
+    send({ type: 'skill_complete', skillId });
+    return finalText.trim() || null;
+  } catch (err) {
+    const message =
+      err instanceof Anthropic.APIError
+        ? `Skill 2 GitHub call failed (${err.status}): ${err.message}`
+        : err?.message || 'Skill 2 GitHub call failed';
+    console.error('Skill 2 GitHub error — falling back to static prompt', message);
+    return null;
+  }
+}
+
 async function runSkill(client, skill, form, send, { skipLifecycle = false } = {}) {
   if (!skipLifecycle) send({ type: 'skill_start', skillId: skill.id });
   try {
@@ -752,9 +902,11 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
   }
 }
 
-async function runAgent(client, form, ragContext, docTypes, sfSession, atlSession, calendarContext, send) {
+async function runAgent(client, form, ragContext, docTypes, sfSession, atlSession, calendarContext, githubSession, send) {
   // Skills 1-5 run in parallel — no inter-skill dependencies.
   // Skill 1: Salesforce tool-using agent (Phase 2).
+  // Skill 2: GitHub tool-using agent (Phase 5) when GitHub is connected;
+  //          falls back to the static runSkill path when it isn't or fails.
   // Skill 4: Confluence MCP agent (Phase 3) when Atlassian is connected;
   //          falls back to the static runSkill path when it isn't or fails.
   // Skill 5: Calendar-aware agent (Phase 4) when Google/MS Calendar is
@@ -764,6 +916,15 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
       if (skill.id === 'client_info') {
         const { output } = await runSkill1Agent(client, form, sfSession, send);
         return { id: skill.id, output };
+      }
+      if (skill.id === 'sdk_setup' && githubSession?.access_token) {
+        const skillOutput = await runSkill2GitHubAgent(client, form, githubSession, send);
+        if (skillOutput) return { id: skill.id, output: skillOutput };
+        // GitHub agent already emitted skill_start — avoid resetting badges.
+        return {
+          id: skill.id,
+          output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
+        };
       }
       if (skill.id === 'tech_env' && atlSession?.access_token) {
         const runner = useMcpConnector()
@@ -877,6 +1038,13 @@ export async function POST(req) {
     calendarContext = await fetchCalendarContext(googleSession, formForCalendar);
   }
 
+  // Phase 5: refresh the GitHub session up-front. The Skill 2 tool-using
+  // agent reads tokens off it directly; if not connected, githubSession
+  // stays null and Skill 2 falls back to the static-prompt path.
+  const storedGitHubSession = await readGitHubSession(req);
+  const { session: githubSession, refreshedSession: githubRefreshed } =
+    await ensureFreshGitHubSession(storedGitHubSession);
+
   // Headers we may append refreshed-session Set-Cookies onto.
   const extraHeaders = new Headers(SSE_HEADERS);
   if (atlRefreshed) {
@@ -886,6 +1054,9 @@ export async function POST(req) {
   }
   if (googleRefreshed) {
     extraHeaders.append('Set-Cookie', await buildGoogleSessionCookie(googleRefreshed));
+  }
+  if (githubRefreshed) {
+    extraHeaders.append('Set-Cookie', await buildGitHubSessionCookie(githubRefreshed));
   }
 
   // Single-doc (regenerate) path — runs the full skill pipeline but only
@@ -909,6 +1080,7 @@ export async function POST(req) {
         sfSession,
         atlSession,
         calendarContext,
+        githubSession,
         send
       );
     });
@@ -928,6 +1100,7 @@ export async function POST(req) {
       sfSession,
       atlSession,
       calendarContext,
+      githubSession,
       send
     );
   });
