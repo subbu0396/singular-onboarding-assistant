@@ -5,7 +5,10 @@
 **Live demo:** [singular-onboarding-assistant.vercel.app](https://singular-onboarding-assistant.vercel.app/)
 
 <!-- Replace with an actual screenshot or 15-30s screen recording -->
-![Screenshot placeholder — replace with a screen recording of the form-to-streaming-docs flow](docs/screenshot.png)
+
+
+https://github.com/user-attachments/assets/a11b7d52-35ef-4029-a177-21b0ab6a6b00
+
 
 ---
 
@@ -196,4 +199,4 @@ src/
 
 ## Credits
 
-Built end-to-end with [Claude](https://claude.com/) and [Claude Code](https://claude.com/claude-code) — including the architecture decisions, the agent pipeline, the OAuth integration, and most of this README.
+Built by Subramanyam and end-to-end with [Claude](https://claude.com/), [Claude Code](https://claude.com/claude-code) and [Cursor](https://cursor.com/) — including the architecture decisions, the agent pipeline, the OAuth integration, and some of this README.
