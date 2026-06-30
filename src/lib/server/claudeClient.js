@@ -186,20 +186,46 @@ Output rules:
   cache_control: { type: 'ephemeral' },
 };
 
-export function buildSkill4UserPrompt(form) {
+export function buildSkill4UserPrompt(form, confluenceContext = null) {
   const skill = SKILLS.find((s) => s.id === 'tech_env');
   const slice = buildFormSlice(skill, form);
+
+  let confluenceSection = '';
+  if (confluenceContext?.pages?.length) {
+    const excerpts = confluenceContext.pages
+      .map((p) => `#### ${p.title}\n${p.excerpt}`)
+      .join('\n\n');
+    confluenceSection = `\n\nConfluence excerpts retrieved for this stack (cite page titles inline when you use them):\n\n${excerpts}`;
+  } else if (confluenceContext?.searched) {
+    confluenceSection =
+      '\n\nConfluence search returned no relevant pages for this stack. Use general best-practice analysis and state that no internal runbook was found.';
+  }
+
   return `Produce the Technical Environment section analysis.
 
 Target MMP: ${getPlatform(form)}
 
 Client tech slice:
 ${JSON.stringify(slice, null, 2)}
+${confluenceSection}
 
-Search Confluence for runbooks and patterns that fit this stack, then produce the analysis. Cite page titles inline when you pull from one.`;
+Synthesize the excerpts (if any) with the form slice into the analysis. Cite page titles inline when you pull from one.`;
 }
 
-export { SKILL4_SYSTEM_BLOCK };
+const SKILL4_REST_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are the Technical Environment skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused technical analysis covering: backend-language SDK availability, warehouse landing patterns, CDP coexistence, and auth-method implications for postbacks and exports.
+
+You may be given excerpts from internal Confluence runbooks retrieved for this client's stack. Synthesize those excerpts with the form data. Where you use a specific operational pattern from a page, name the page title inline (e.g., "Per the 'Snowflake landing schema' runbook, ..."). If no excerpts were provided or none are relevant, use general best practices and say so — do not invent content from page titles alone.
+
+Output rules:
+- 120-220 words, plain prose, no markdown headers, no bullet lists.
+- No preamble ("Here is the analysis...") and no closing summary.
+- Do not write the runbook, FAQ, or checklist itself — this is intermediate context for a downstream compilation step.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+export { SKILL4_SYSTEM_BLOCK, SKILL4_REST_SYSTEM_BLOCK };
 
 function buildSkillUserPrompt(skill, form) {
   const slice = Object.fromEntries(skill.fields.map((f) => [f, form[f]]));

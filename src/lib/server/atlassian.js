@@ -180,3 +180,149 @@ export async function ensureFreshAtlassianSession(session) {
   };
   return { session: next, refreshedSession: next };
 }
+
+function confluenceApiBase(cloudId) {
+  return `https://api.atlassian.com/ex/confluence/${cloudId}/wiki/rest/api`;
+}
+
+function stripHtml(html) {
+  return String(html || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export async function resolveCloudId(session) {
+  if (session?.cloud_id) return session.cloud_id;
+  const resources = await fetchAccessibleResources(session.access_token);
+  return resources?.[0]?.id || null;
+}
+
+/** Derive 1-3 Confluence search queries from the form's tech-environment slice. */
+export function deriveConfluenceQueries(form) {
+  const queries = [];
+  const platform = form.targetMmp || 'MMP';
+
+  if (form.backendLanguage) {
+    queries.push(`${form.backendLanguage} ${platform} SDK`);
+  }
+  if (form.dataExportMethods?.includes('Snowflake')) {
+    queries.push('Snowflake export landing schema');
+  } else if (form.dataExportMethods?.length) {
+    queries.push(`${form.dataExportMethods[0]} data export integration`);
+  }
+  if (form.usesCdp && form.cdpName) {
+    queries.push(`${form.cdpName} CDP coexistence`);
+  } else if (form.authMethod) {
+    queries.push(`${form.authMethod} postback authentication`);
+  }
+
+  const unique = [...new Set(queries.map((q) => q.trim()).filter(Boolean))];
+  return unique.slice(0, 3);
+}
+
+export async function searchConfluence(session, cloudId, query, limit = 3) {
+  const cql = `text ~ "${query.replace(/"/g, '\\"')}" AND type=page`;
+  const url = `${confluenceApiBase(cloudId)}/search?cql=${encodeURIComponent(cql)}&limit=${limit}`;
+
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Confluence search failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return (data.results || []).map((hit) => ({
+    id: hit.content?.id || hit.id,
+    title: hit.content?.title || hit.title || 'Untitled',
+    excerpt: stripHtml(hit.excerpt || hit.content?.excerpt || ''),
+  }));
+}
+
+export async function fetchConfluencePage(session, cloudId, pageId) {
+  const url = `${confluenceApiBase(cloudId)}/content/${pageId}?expand=body.storage`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      Accept: 'application/json',
+    },
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Confluence page fetch failed (${res.status}): ${body.slice(0, 200)}`);
+  }
+
+  const page = await res.json();
+  const raw = page.body?.storage?.value || '';
+  const text = stripHtml(raw);
+  return {
+    id: page.id,
+    title: page.title || 'Untitled',
+    excerpt: text.slice(0, 2500),
+  };
+}
+
+// Skill 4 REST path — we call Confluence directly instead of Anthropic's MCP
+// connector, which can hang 60s+ on Atlassian's cold MCP handshake.
+export async function buildConfluenceContextForSkill4(session, form, emitTool) {
+  const cloudId = await resolveCloudId(session);
+  if (!cloudId) {
+    throw new Error('No Atlassian cloud_id available for Confluence API');
+  }
+
+  const queries = deriveConfluenceQueries(form);
+  const seenPageIds = new Set();
+  const pages = [];
+
+  for (const query of queries) {
+    const toolName = 'searchConfluence';
+    emitTool?.('start', toolName, { query });
+    try {
+      const hits = await searchConfluence(session, cloudId, query, 2);
+      emitTool?.('complete', toolName, { ok: true });
+
+      for (const hit of hits) {
+        if (!hit.id || seenPageIds.has(hit.id)) continue;
+        seenPageIds.add(hit.id);
+
+        const fetchTool = 'getConfluencePage';
+        emitTool?.('start', fetchTool, { pageId: hit.id, title: hit.title });
+        try {
+          const page = await fetchConfluencePage(session, cloudId, hit.id);
+          pages.push(page);
+          emitTool?.('complete', fetchTool, { ok: true });
+        } catch (err) {
+          emitTool?.('complete', fetchTool, {
+            ok: false,
+            message: err?.message || 'Page fetch failed',
+          });
+          if (hit.excerpt) {
+            pages.push({ id: hit.id, title: hit.title, excerpt: hit.excerpt.slice(0, 1500) });
+          }
+        }
+
+        if (pages.length >= 2) break;
+      }
+    } catch (err) {
+      emitTool?.('complete', toolName, {
+        ok: false,
+        message: err?.message || 'Search failed',
+      });
+    }
+
+    if (pages.length >= 2) break;
+  }
+
+  return { cloudId, queries, pages, searched: queries.length > 0 };
+}
+
+export function useMcpConnector() {
+  return process.env.ATLASSIAN_USE_MCP_CONNECTOR === 'true';
+}

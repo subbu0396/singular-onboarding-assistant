@@ -18,6 +18,9 @@ const TOOL_LABELS = {
   lookup_salesforce_client: 'Salesforce',
   use_form_data: 'Form data',
   mcp_tool: 'Confluence',
+  searchConfluence: 'Confluence: search',
+  getConfluencePage: 'Confluence: page',
+  confluence_mcp_connect: 'Confluence: connecting',
 };
 
 // Atlassian MCP tool names are namespaced (e.g. "atlassian.searchConfluence");

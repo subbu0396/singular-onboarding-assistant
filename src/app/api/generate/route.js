@@ -1,5 +1,5 @@
-export const runtime = 'edge';
-export const maxDuration = 60;
+export const runtime = 'nodejs';
+export const maxDuration = 120;
 
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -11,6 +11,7 @@ import {
   SKILL1_SYSTEM_BLOCK,
   SKILL1_TOOLS,
   SKILL4_SYSTEM_BLOCK,
+  SKILL4_REST_SYSTEM_BLOCK,
   buildSkillUserPrompt,
   buildSkill1UserPrompt,
   buildSkill4UserPrompt,
@@ -20,6 +21,8 @@ import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
 import {
   ensureFreshAtlassianSession,
   getMcpUrl,
+  buildConfluenceContextForSkill4,
+  useMcpConnector,
 } from '@/lib/server/atlassian';
 import {
   readSession,
@@ -34,6 +37,7 @@ const SKILL_MAX_TOKENS = 1500;
 const SKILL1_MAX_ITERATIONS = 4;
 const MCP_BETA = 'mcp-client-2025-11-20';
 const ATLASSIAN_MCP_SERVER_NAME = 'atlassian';
+const SKILL4_MCP_TIMEOUT_MS = 45_000;
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -268,19 +272,98 @@ async function runSkill1Agent(client, form, sfSession, send) {
   }
 }
 
-// Skill 4: when Atlassian is connected, run via Anthropic's MCP connector
-// against the Atlassian Rovo MCP server. Otherwise fall back to the static
-// runSkill path so onboarding still works without Atlassian set up.
+function emitToolEvent(send, skillId, phase, toolName, extra = {}) {
+  if (phase === 'start') {
+    send({
+      type: 'tool_call_start',
+      skillId,
+      toolName,
+      input: extra.input || {},
+    });
+  } else {
+    send({
+      type: 'tool_call_complete',
+      skillId,
+      toolName,
+      ok: extra.ok !== false,
+      message: extra.message,
+    });
+  }
+}
+
+// Skill 4 (default): Confluence REST + Claude — reliable, fires tool badges.
+async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
+  const skillId = 'tech_env';
+  send({ type: 'skill_start', skillId });
+
+  try {
+    const confluenceContext = await buildConfluenceContextForSkill4(
+      atlSession,
+      form,
+      (phase, toolName, payload) => {
+        if (phase === 'start') {
+          emitToolEvent(send, skillId, 'start', toolName, { input: payload });
+        } else {
+          emitToolEvent(send, skillId, 'complete', toolName, {
+            ok: payload?.ok !== false,
+            message: payload?.message,
+          });
+        }
+      }
+    );
+
+    const stream = client.messages.stream({
+      model: MODEL,
+      max_tokens: SKILL_MAX_TOKENS,
+      system: [SKILL4_REST_SYSTEM_BLOCK],
+      messages: [
+        {
+          role: 'user',
+          content: buildSkill4UserPrompt(form, confluenceContext),
+        },
+      ],
+    });
+
+    let output = '';
+    for await (const event of stream) {
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta.type === 'text_delta'
+      ) {
+        output += event.delta.text;
+      }
+    }
+
+    const final = await stream.finalMessage();
+    if (final.stop_reason === 'refusal') {
+      send({
+        type: 'skill_error',
+        skillId,
+        message: 'Refused by safety filters.',
+      });
+      return null;
+    }
+
+    send({ type: 'skill_complete', skillId });
+    return output.trim() || null;
+  } catch (err) {
+    const message = err?.message || 'Skill 4 Confluence agent failed';
+    console.error('Skill 4 Confluence REST error — falling back to static prompt', message);
+    send({ type: 'skill_error', skillId, message });
+    return null;
+  }
+}
+
+// Skill 4 (opt-in via ATLASSIAN_USE_MCP_CONNECTOR=true): Anthropic MCP connector.
+// Can hang 60s+ on Atlassian cold start — kept for experimentation only.
 async function runSkill4McpAgent(client, form, atlSession, send) {
   const skillId = 'tech_env';
   send({ type: 'skill_start', skillId });
 
   let output = '';
-  // Track the active MCP tool_use block so we can complete it by the same
-  // toolName the start event used (the UI matches running calls by name).
   const activeMcpToolByIndex = new Map();
 
-  try {
+  const runMcp = async () => {
     const stream = client.beta.messages.stream({
       model: MODEL,
       max_tokens: SKILL_MAX_TOKENS,
@@ -298,19 +381,19 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
       betas: [MCP_BETA],
     });
 
+    emitToolEvent(send, skillId, 'start', 'confluence_mcp_connect', {
+      input: { url: getMcpUrl() },
+    });
+
     for await (const event of stream) {
-      // Surface MCP tool calls to the UI as they're issued so the
-      // SkillProgress badge lights up per tool — same pattern Skill 1 uses.
       if (
         event.type === 'content_block_start' &&
         event.content_block?.type === 'mcp_tool_use'
       ) {
+        emitToolEvent(send, skillId, 'complete', 'confluence_mcp_connect', { ok: true });
         const toolName = event.content_block.name || 'mcp_tool';
         activeMcpToolByIndex.set(event.index, toolName);
-        send({
-          type: 'tool_call_start',
-          skillId,
-          toolName,
+        emitToolEvent(send, skillId, 'start', toolName, {
           input: event.content_block.input || {},
         });
       }
@@ -320,12 +403,7 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
       ) {
         const toolName = activeMcpToolByIndex.get(event.index);
         activeMcpToolByIndex.delete(event.index);
-        send({
-          type: 'tool_call_complete',
-          skillId,
-          toolName,
-          ok: true,
-        });
+        emitToolEvent(send, skillId, 'complete', toolName, { ok: true });
       }
       if (
         event.type === 'content_block_delta' &&
@@ -347,15 +425,24 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
 
     send({ type: 'skill_complete', skillId });
     return output.trim() || null;
+  };
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(
+      () => reject(new Error(`MCP connector timed out after ${SKILL4_MCP_TIMEOUT_MS}ms`)),
+      SKILL4_MCP_TIMEOUT_MS
+    );
+  });
+
+  try {
+    return await Promise.race([runMcp(), timeout]);
   } catch (err) {
-    // If the MCP server itself rejects the token (401) or anything else goes
-    // sideways, fall through to the static prompt so the onboarding still
-    // completes. Close any tool badges still showing as running.
+    emitToolEvent(send, skillId, 'complete', 'confluence_mcp_connect', {
+      ok: false,
+      message: err?.message,
+    });
     for (const [, toolName] of activeMcpToolByIndex) {
-      send({
-        type: 'tool_call_complete',
-        skillId,
-        toolName,
+      emitToolEvent(send, skillId, 'complete', toolName, {
         ok: false,
         message: err?.message || 'MCP call failed',
       });
@@ -464,9 +551,12 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         return { id: skill.id, output };
       }
       if (skill.id === 'tech_env' && atlSession?.access_token) {
-        const mcpOutput = await runSkill4McpAgent(client, form, atlSession, send);
-        if (mcpOutput) return { id: skill.id, output: mcpOutput };
-        // MCP path returned null (refusal / error) — fall through to static.
+        const runner = useMcpConnector()
+          ? runSkill4McpAgent
+          : runSkill4ConfluenceAgent;
+        const skillOutput = await runner(client, form, atlSession, send);
+        if (skillOutput) return { id: skill.id, output: skillOutput };
+        // Confluence/MCP path returned null — fall through to static.
       }
       return { id: skill.id, output: await runSkill(client, skill, form, send) };
     })
