@@ -113,7 +113,10 @@ function SkillContextPanel({ context }) {
             </span>
           )}
           {risk && (
-            <span className="font-medium uppercase tracking-wider">
+            <span
+              className="font-medium uppercase tracking-wider"
+              title={context.riskRationale || RISK_LABELS[risk] || risk}
+            >
               {RISK_LABELS[risk] || risk}
             </span>
           )}
@@ -149,6 +152,15 @@ function SkillContextPanel({ context }) {
           title={context.engNotes}
         >
           <span className="not-italic text-slate-500">Eng: </span>“{context.engNotes}”
+        </p>
+      )}
+      {context.riskRationale && (
+        <p
+          className="line-clamp-2 text-slate-400"
+          title={context.riskRationale}
+        >
+          <span className="text-slate-500">Why: </span>
+          {context.riskRationale}
         </p>
       )}
     </div>
