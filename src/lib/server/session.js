@@ -15,6 +15,10 @@ const SF_SESSION_COOKIE = 'sf_session';
 const SF_STATE_COOKIE = 'sf_oauth_state';
 const ATL_SESSION_COOKIE = 'atl_session';
 const ATL_STATE_COOKIE = 'atl_oauth_state';
+const GOOGLE_SESSION_COOKIE = 'google_session';
+const GOOGLE_STATE_COOKIE = 'google_oauth_state';
+const MS_SESSION_COOKIE = 'ms_session';
+const MS_STATE_COOKIE = 'ms_oauth_state';
 const ATL_SESSION_COUNT_COOKIE = 'atl_session_c';
 const ATL_SESSION_CHUNK_PREFIX = 'atl_session_';
 // Browsers reject cookies whose name+value+attrs exceed ~4096 bytes.
@@ -335,6 +339,68 @@ export async function readAtlassianStateCookie(req) {
 
 export function buildClearAtlassianStateCookie() {
   return buildClearCookieFor(ATL_STATE_COOKIE);
+}
+
+// --- Google Calendar session (Phase 4) ---
+//
+// Payload shape: { access_token, refresh_token, expires_at, scope,
+//                  identity?: { email, name } }
+// Google access tokens are short (~150 chars) — no chunking needed.
+
+export function readGoogleSession(req) {
+  return readCookieJwt(req, GOOGLE_SESSION_COOKIE);
+}
+
+export function buildGoogleSessionCookie(payload) {
+  return buildSessionCookieFor(GOOGLE_SESSION_COOKIE, payload);
+}
+
+export function buildClearGoogleSessionCookie() {
+  return buildClearCookieFor(GOOGLE_SESSION_COOKIE);
+}
+
+export function buildGoogleStateCookie(state) {
+  return buildStateCookieFor(GOOGLE_STATE_COOKIE, state);
+}
+
+export async function readGoogleStateCookie(req) {
+  const payload = await readCookieJwt(req, GOOGLE_STATE_COOKIE);
+  return payload?.state || null;
+}
+
+export function buildClearGoogleStateCookie() {
+  return buildClearCookieFor(GOOGLE_STATE_COOKIE);
+}
+
+// --- Microsoft Graph session (Phase 4) ---
+//
+// Payload shape mirrors Google's. Microsoft access tokens are larger
+// (~2KB JWTs) but still fit comfortably in a single cookie when paired
+// with a refresh token — no chunking needed in practice.
+
+export function readMicrosoftSession(req) {
+  return readCookieJwt(req, MS_SESSION_COOKIE);
+}
+
+export function buildMicrosoftSessionCookie(payload) {
+  return buildSessionCookieFor(MS_SESSION_COOKIE, payload);
+}
+
+export function buildClearMicrosoftSessionCookie() {
+  return buildClearCookieFor(MS_SESSION_COOKIE);
+}
+
+export function buildMicrosoftStateCookie(state) {
+  return buildStateCookieFor(MS_STATE_COOKIE, state);
+}
+
+export async function readMicrosoftStateCookie(req) {
+  const payload = await readCookieJwt(req, MS_STATE_COOKIE);
+  return payload?.state || null;
+}
+
+export function buildClearMicrosoftStateCookie() {
+  return buildClearCookieFor(MS_STATE_COOKIE);
 }
 
 export function generateRandomState() {
