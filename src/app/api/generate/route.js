@@ -271,87 +271,100 @@ async function runSkill1Agent(client, form, sfSession, send) {
 // Skill 4: when Atlassian is connected, run via Anthropic's MCP connector
 // against the Atlassian Rovo MCP server. Otherwise fall back to the static
 // runSkill path so onboarding still works without Atlassian set up.
-async function runSkill4McpAgent(client, form, atlAccessToken, send) {
+//
+// We hit the Anthropic API with raw fetch rather than the SDK because
+// @anthropic-ai/sdk@0.40.1 silently drops `authorization_token` from
+// mcp_servers entries during request serialization (the new beta
+// mcp-client-2025-11-20 shape didn't exist when 0.40.1 was released).
+// Non-streaming is fine here — Skill 4's output is accumulated and handed
+// off to Skill 6, not streamed to the user.
+async function runSkill4McpAgent(form, atlAccessToken, apiKey, send) {
   const skillId = 'tech_env';
   send({ type: 'skill_start', skillId });
 
-  let output = '';
-  // Track the active MCP tool_use block so we can complete it by the same
-  // toolName the start event used (the UI matches running calls by name).
-  const activeMcpToolByIndex = new Map();
+  const activeMcpTools = new Map();
+  let response;
 
   try {
-    const stream = client.beta.messages.stream({
-      model: MODEL,
-      max_tokens: SKILL_MAX_TOKENS,
-      system: [SKILL4_SYSTEM_BLOCK],
-      messages: [{ role: 'user', content: buildSkill4UserPrompt(form) }],
-      mcp_servers: [
-        {
-          type: 'url',
-          url: getMcpUrl(),
-          name: ATLASSIAN_MCP_SERVER_NAME,
-          authorization_token: atlAccessToken,
-        },
-      ],
-      tools: [{ type: 'mcp_toolset', mcp_server_name: ATLASSIAN_MCP_SERVER_NAME }],
-      betas: [MCP_BETA],
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': MCP_BETA,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: SKILL_MAX_TOKENS,
+        system: [SKILL4_SYSTEM_BLOCK],
+        messages: [{ role: 'user', content: buildSkill4UserPrompt(form) }],
+        mcp_servers: [
+          {
+            type: 'url',
+            url: getMcpUrl(),
+            name: ATLASSIAN_MCP_SERVER_NAME,
+            authorization_token: atlAccessToken,
+          },
+        ],
+        tools: [{ type: 'mcp_toolset', mcp_server_name: ATLASSIAN_MCP_SERVER_NAME }],
+      }),
     });
 
-    for await (const event of stream) {
-      // Surface MCP tool calls to the UI as they're issued so the
-      // SkillProgress badge lights up per tool — same pattern Skill 1 uses.
-      if (
-        event.type === 'content_block_start' &&
-        event.content_block?.type === 'mcp_tool_use'
-      ) {
-        const toolName = event.content_block.name || 'mcp_tool';
-        activeMcpToolByIndex.set(event.index, toolName);
+    if (!response.ok) {
+      const body = await response.text().catch(() => '');
+      throw new Error(`Skill 4 MCP call failed (${response.status}): ${body}`);
+    }
+
+    const message = await response.json();
+
+    if (message.stop_reason === 'refusal') {
+      send({ type: 'skill_error', skillId, message: 'Refused by safety filters.' });
+      return null;
+    }
+
+    // Walk the response's content blocks. Emit a synthetic
+    // tool_call_start + tool_call_complete pair for each mcp_tool_use so
+    // the SkillProgress badges show up, and concatenate text blocks into
+    // the analyst's output.
+    let output = '';
+    for (const block of message.content || []) {
+      if (block.type === 'mcp_tool_use') {
+        const toolName = block.name || 'mcp_tool';
+        activeMcpTools.set(block.id, toolName);
         send({
           type: 'tool_call_start',
           skillId,
           toolName,
-          input: event.content_block.input || {},
+          input: block.input || {},
         });
       }
-      if (
-        event.type === 'content_block_stop' &&
-        activeMcpToolByIndex.has(event.index)
-      ) {
-        const toolName = activeMcpToolByIndex.get(event.index);
-        activeMcpToolByIndex.delete(event.index);
+      if (block.type === 'mcp_tool_result') {
+        const toolName = activeMcpTools.get(block.tool_use_id) || 'mcp_tool';
+        activeMcpTools.delete(block.tool_use_id);
         send({
           type: 'tool_call_complete',
           skillId,
           toolName,
-          ok: true,
+          ok: !block.is_error,
         });
       }
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta?.type === 'text_delta'
-      ) {
-        output += event.delta.text;
+      if (block.type === 'text') {
+        output += block.text;
       }
     }
 
-    const final = await stream.finalMessage();
-    if (final.stop_reason === 'refusal') {
-      send({
-        type: 'skill_error',
-        skillId,
-        message: 'Refused by safety filters.',
-      });
-      return null;
+    // Any unmatched mcp_tool_use (no result block found) — close them as ok
+    // so the UI doesn't show a stuck "running" badge.
+    for (const [, toolName] of activeMcpTools) {
+      send({ type: 'tool_call_complete', skillId, toolName, ok: true });
     }
+    activeMcpTools.clear();
 
     send({ type: 'skill_complete', skillId });
     return output.trim() || null;
   } catch (err) {
-    // If the MCP server itself rejects the token (401) or anything else goes
-    // sideways, fall through to the static prompt so the onboarding still
-    // completes. Close any tool badges still showing as running.
-    for (const [, toolName] of activeMcpToolByIndex) {
+    for (const [, toolName] of activeMcpTools) {
       send({
         type: 'tool_call_complete',
         skillId,
@@ -360,11 +373,8 @@ async function runSkill4McpAgent(client, form, atlAccessToken, send) {
         message: err?.message || 'MCP call failed',
       });
     }
-    activeMcpToolByIndex.clear();
-    const message =
-      err instanceof Anthropic.APIError
-        ? `Skill 4 MCP call failed (${err.status}): ${err.message}`
-        : err?.message || 'Skill 4 MCP call failed';
+    activeMcpTools.clear();
+    const message = err?.message || 'Skill 4 MCP call failed';
     console.error('Skill 4 MCP error — falling back to static prompt', message);
     return null;
   }
@@ -452,7 +462,7 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
   }
 }
 
-async function runAgent(client, form, ragContext, docTypes, sfSession, atlAccessToken, send) {
+async function runAgent(client, form, ragContext, docTypes, sfSession, atlAccessToken, apiKey, send) {
   // Skills 1-5 run in parallel — no inter-skill dependencies.
   // Skill 1: Salesforce tool-using agent (Phase 2).
   // Skill 4: Confluence MCP agent (Phase 3) when Atlassian is connected;
@@ -464,7 +474,7 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlAccess
         return { id: skill.id, output };
       }
       if (skill.id === 'tech_env' && atlAccessToken) {
-        const mcpOutput = await runSkill4McpAgent(client, form, atlAccessToken, send);
+        const mcpOutput = await runSkill4McpAgent(form, atlAccessToken, apiKey, send);
         if (mcpOutput) return { id: skill.id, output: mcpOutput };
         // MCP path returned null (refusal / error) — fall through to static.
       }
@@ -532,11 +542,6 @@ export async function POST(req) {
   if (atlSession?.refresh_token) {
     const { accessToken, refreshedSession } = await getAtlassianAccessToken(atlSession);
     atlAccessToken = accessToken;
-    console.log('Atlassian access token refresh:', {
-      type: typeof accessToken,
-      length: typeof accessToken === 'string' ? accessToken.length : null,
-      preview: typeof accessToken === 'string' ? `${accessToken.slice(0, 20)}...` : accessToken,
-    });
     if (refreshedSession) {
       extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(refreshedSession));
     }
@@ -562,6 +567,7 @@ export async function POST(req) {
         [body.docType],
         sfSession,
         atlAccessToken,
+        apiKey,
         send
       );
     });
