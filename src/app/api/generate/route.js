@@ -532,6 +532,11 @@ export async function POST(req) {
   if (atlSession?.refresh_token) {
     const { accessToken, refreshedSession } = await getAtlassianAccessToken(atlSession);
     atlAccessToken = accessToken;
+    console.log('Atlassian access token refresh:', {
+      type: typeof accessToken,
+      length: typeof accessToken === 'string' ? accessToken.length : null,
+      preview: typeof accessToken === 'string' ? `${accessToken.slice(0, 20)}...` : accessToken,
+    });
     if (refreshedSession) {
       extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(refreshedSession));
     }
