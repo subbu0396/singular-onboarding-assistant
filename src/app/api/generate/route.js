@@ -691,17 +691,44 @@ function computeTimelineRiskHeuristic({ targetGoLiveDate, engBusyMinutes, seBusy
 // free-text notes alongside the calendar numbers and outputs a structured
 // {risk_level, rationale}. This catches conflicts the busy-minute heuristic
 // can't see — e.g. "PTO 5-9 Aug" overlapping a 12 Aug go-live.
-const RISK_ASSESSMENT_SYSTEM = `You assess go-live timeline risk for an MMP onboarding. Output ONLY a JSON object: {"risk_level":"green"|"amber"|"red","rationale":"one short sentence"}.
+//
+// We force structured output via tool_use rather than asking Claude to
+// emit raw JSON — the previous text-then-regex approach occasionally
+// extracted the wrong field when the model wrote its reasoning out loud
+// before the JSON, or got truncated mid-rationale at max_tokens.
+const RISK_ASSESSMENT_SYSTEM = `You assess go-live timeline risk for an MMP onboarding. Apply the rules below in order; STOP at the first matching rule.
 
-Rules (apply in order):
-1. If ANY date range in se_notes or engineering_notes overlaps the go-live date or the 7 days before/after it → red. Common patterns: "PTO 5-9 Aug", "code freeze 8-12 Aug", "on leave 9-15 Aug". Parse loosely.
+Rules:
+1. If ANY date range in se_notes or engineering_notes overlaps the go-live date or the 7 days before/after it → red. Common patterns: "PTO 5-9 Aug", "code freeze 8-12 Aug", "on leave 9-15 Aug". Parse loosely. Empty notes or notes that are literally "NA", "N/A", "none", or "n/a" carry no conflict signal — skip this rule.
 2. If days_to_go_live < 7 → red.
-3. If engineering_busy_minutes or se_busy_minutes exceeds 50% of a 21-day workday window (>3000 minutes) and days_to_go_live < 21 → red.
-4. If days_to_go_live < 14 with any conflict signal → amber.
-5. If busy minutes exceed 30% (>1800) → amber.
+3. If engineering_busy_minutes or se_busy_minutes exceeds 3000 AND days_to_go_live < 21 → red.
+4. If days_to_go_live < 14 → amber.
+5. If engineering_busy_minutes or se_busy_minutes exceeds 1800 → amber.
 6. Otherwise → green.
 
-Rationale must name the specific conflict that triggered the level (the overlapping date range, the busy minute count, or the tight target).`;
+Then call the report_timeline_risk tool with the matched level and a one-sentence rationale naming the specific trigger.`;
+
+const RISK_ASSESSMENT_TOOL = {
+  name: 'report_timeline_risk',
+  description: 'Report the timeline risk assessment derived from applying the rules in order.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      risk_level: {
+        type: 'string',
+        enum: ['green', 'amber', 'red'],
+        description: 'The matched risk level.',
+      },
+      rationale: {
+        type: 'string',
+        description:
+          'One short sentence naming the specific trigger — the rule that matched, the overlapping date range, the busy minute count, or "no conflicts found" for green.',
+      },
+    },
+    required: ['risk_level', 'rationale'],
+    additionalProperties: false,
+  },
+};
 
 async function assessTimelineRisk(client, form, calendarContext) {
   const targetGoLiveDate =
@@ -724,8 +751,10 @@ async function assessTimelineRisk(client, form, calendarContext) {
   try {
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 300,
+      max_tokens: 500,
       system: RISK_ASSESSMENT_SYSTEM,
+      tools: [RISK_ASSESSMENT_TOOL],
+      tool_choice: { type: 'tool', name: 'report_timeline_risk' },
       messages: [
         {
           role: 'user',
@@ -742,16 +771,13 @@ async function assessTimelineRisk(client, form, calendarContext) {
       ],
     });
 
-    const text = response.content?.find((b) => b.type === 'text')?.text || '';
-    const match = text.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      if (['green', 'amber', 'red'].includes(parsed.risk_level)) {
-        return {
-          riskLevel: parsed.risk_level,
-          rationale: typeof parsed.rationale === 'string' ? parsed.rationale : null,
-        };
-      }
+    const toolUse = response.content?.find((b) => b.type === 'tool_use' && b.name === 'report_timeline_risk');
+    const input = toolUse?.input;
+    if (input && ['green', 'amber', 'red'].includes(input.risk_level)) {
+      return {
+        riskLevel: input.risk_level,
+        rationale: typeof input.rationale === 'string' ? input.rationale : null,
+      };
     }
   } catch (err) {
     console.error('Timeline risk assessment failed — using heuristic', err?.message || err);
