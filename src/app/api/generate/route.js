@@ -75,12 +75,15 @@ const RUNBOOK_DYNAMIC_BLOCK = {
   text: `You are generating an Integration Runbook.
 Structure it with exactly these sections:
 1. Pre-Integration Checklist
-2. SDK Integration Steps (one subsection per platform in the client stack)
-3. Event Mapping Table
-4. Postback / S2S Configuration
-5. Data Export Setup
-6. QA and Validation Steps
-7. Go-Live Sign-off Criteria`,
+2. Onboarding Schedule & Availability
+3. SDK Integration Steps (one subsection per platform in the client stack)
+4. Event Mapping Table
+5. Postback / S2S Configuration
+6. Data Export Setup
+7. QA and Validation Steps
+8. Go-Live Sign-off Criteria
+
+In section 2 (Onboarding Schedule & Availability), surface scheduling specifics from the Go-Live Timeline analysis: target go-live date, the SE's own availability notes (quote them verbatim if provided), and any engineering-capacity flags from the connected calendar. If the SE supplied availability windows, propose concrete kickoff / SDK-review / cutover slots within those windows. If no SE notes or calendar data was provided, say "No SE availability or calendar data provided — schedule TBD" and move on.`,
 };
 
 const FAQ_DYNAMIC_BLOCK = {

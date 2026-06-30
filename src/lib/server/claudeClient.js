@@ -395,12 +395,15 @@ All steps, SDK references, dashboard URLs, and terminology must be specific to $
 
 Structure the runbook with these sections:
 1. Pre-Integration Checklist
-2. SDK Integration Steps (per platform selected)
-3. Event Mapping Table (with 8-10 relevant standard events for their industry)
-4. Postback/S2S Configuration
-5. Data Export Setup
-6. QA & Validation Steps
-7. Go-Live Sign-off Criteria
+2. Onboarding Schedule & Availability
+3. SDK Integration Steps (per platform selected)
+4. Event Mapping Table (with 8-10 relevant standard events for their industry)
+5. Postback/S2S Configuration
+6. Data Export Setup
+7. QA & Validation Steps
+8. Go-Live Sign-off Criteria
+
+Section 2 must surface scheduling specifics from the Go-Live Timeline analysis: quote the SE's availability notes verbatim if provided, propose concrete kickoff / SDK-review / cutover slots within those windows, and call out any engineering-capacity flags from the connected calendar. If no SE notes or calendar data was provided, say "No SE availability or calendar data provided — schedule TBD" and move on.
 
 Use markdown formatting with clear headings. Be specific to their tech stack, industry, and ${platform}.
 
