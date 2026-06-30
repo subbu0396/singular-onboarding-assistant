@@ -516,12 +516,38 @@ async function runSkill(client, skill, form, send, { skipLifecycle = false } = {
 // around the target go-live date) and run the timeline skill with that
 // context in the prompt. Falls back to the static runSkill path when no
 // calendar is connected or the fetch fails.
+// Risk heuristic for the Go-Live Timeline card. Conservative — would rather
+// flag amber/red and let the SE override than silently green-light a tight
+// slot. Inputs: days remaining, engineering and SE busy minutes inside a
+// ~21-day window, and whether the SE supplied written notes (taken as a
+// signal that someone is paying attention to coverage).
+const TIMELINE_WINDOW_MINUTES = 21 * 8 * 60; // 21 days × 8 working hours
+function computeTimelineRisk({ targetGoLiveDate, engBusyMinutes, seBusyMinutes }) {
+  const target = targetGoLiveDate ? Date.parse(targetGoLiveDate) : NaN;
+  const daysToGoLive = Number.isFinite(target)
+    ? Math.max(0, Math.round((target - Date.now()) / (1000 * 60 * 60 * 24)))
+    : null;
+  const engRatio = (engBusyMinutes || 0) / TIMELINE_WINDOW_MINUTES;
+  const seRatio = (seBusyMinutes || 0) / TIMELINE_WINDOW_MINUTES;
+  const maxRatio = Math.max(engRatio, seRatio);
+
+  if (daysToGoLive !== null && daysToGoLive < 7) return 'red';
+  if (maxRatio > 0.6 && (daysToGoLive === null || daysToGoLive < 21)) return 'red';
+  if (maxRatio > 0.4) return 'amber';
+  if (daysToGoLive !== null && daysToGoLive < 14) return 'amber';
+  return 'green';
+}
+
 async function runSkill5CalendarAgent(client, form, calendarContext, send) {
   const skillId = 'timeline';
   send({ type: 'skill_start', skillId });
   // Push a structured context summary to the pipeline UI so the SE can
   // see at-a-glance which signals fed the timeline analysis (engineering
   // busy minutes, SE busy minutes, SE-provided notes).
+  const targetGoLiveDate =
+    calendarContext?.target_go_live_date || form?.targetGoLiveDate || null;
+  const engBusyMinutes = calendarContext?.engineering_calendar?.total_busy_minutes || 0;
+  const seBusyMinutes = calendarContext?.se_calendar?.total_busy_minutes || 0;
   send({
     type: 'skill_context',
     skillId,
@@ -531,7 +557,13 @@ async function runSkill5CalendarAgent(client, form, calendarContext, send) {
       engineering: calendarContext?.engineering_calendar || null,
       se: calendarContext?.se_calendar || null,
       seNotes: form?.seAvailabilityNotes?.trim() || null,
-      targetGoLiveDate: calendarContext?.target_go_live_date || form?.targetGoLiveDate || null,
+      engNotes: form?.engineeringAvailabilityNotes?.trim() || null,
+      targetGoLiveDate,
+      riskLevel: computeTimelineRisk({
+        targetGoLiveDate,
+        engBusyMinutes,
+        seBusyMinutes,
+      }),
     },
   });
   // Surface that we hit a calendar so the UI can show a tool badge,
@@ -686,17 +718,28 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
           output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
         };
       }
-      if (skill.id === 'timeline' && form?.seAvailabilityNotes?.trim()) {
+      if (
+        skill.id === 'timeline' &&
+        (form?.seAvailabilityNotes?.trim() || form?.engineeringAvailabilityNotes?.trim())
+      ) {
         // No calendar connected but the SE typed availability notes — still
         // surface those in the pipeline UI so the SE can see what fed the
-        // timeline analysis even without Google Calendar.
+        // timeline analysis even without Google Calendar. Without busy
+        // minutes the risk falls back to a pure days-to-go-live heuristic.
+        const targetGoLiveDate = form?.targetGoLiveDate || null;
         send({
           type: 'skill_context',
           skillId: 'timeline',
           context: {
-            source: 'se_notes_only',
-            seNotes: form.seAvailabilityNotes.trim(),
-            targetGoLiveDate: form?.targetGoLiveDate || null,
+            source: 'notes_only',
+            seNotes: form.seAvailabilityNotes?.trim() || null,
+            engNotes: form.engineeringAvailabilityNotes?.trim() || null,
+            targetGoLiveDate,
+            riskLevel: computeTimelineRisk({
+              targetGoLiveDate,
+              engBusyMinutes: 0,
+              seBusyMinutes: 0,
+            }),
           },
         });
       }

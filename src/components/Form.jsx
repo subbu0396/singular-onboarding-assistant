@@ -415,6 +415,22 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
                 Skill 5 uses this alongside any connected calendar to ground the timeline analysis in your real availability.
               </p>
             </div>
+            <div id="engineeringAvailabilityNotes">
+              <label className="form-label" htmlFor="eng-availability-notes-input">
+                Engineering team availability{' '}
+                <span className="text-xs font-normal text-slate-500">(optional)</span>
+              </label>
+              <textarea
+                id="eng-availability-notes-input"
+                className="form-input min-h-[88px] resize-y"
+                placeholder="e.g. Mobile team in code freeze 12–16 Aug; iOS lead on PTO 19–26 Aug; bandwidth for 1 escalation/week."
+                value={form.engineeringAvailabilityNotes}
+                onChange={(e) => update('engineeringAvailabilityNotes', e.target.value)}
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Used together with your availability to flag timeline risk (green / amber / red) on the Go-Live Timeline pipeline card.
+              </p>
+            </div>
           </div>
         );
 
