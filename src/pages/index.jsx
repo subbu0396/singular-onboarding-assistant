@@ -88,6 +88,7 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [skillStatus, setSkillStatus] = useState(EMPTY_SKILL_STATUS);
   const [toolCalls, setToolCalls] = useState(EMPTY_TOOL_CALLS);
+  const [skillContexts, setSkillContexts] = useState({});
 
   const deltaBufferRef = useRef({});
   const flushScheduledRef = useRef(false);
@@ -128,6 +129,10 @@ export default function Home() {
     }
     if (event.type === 'skill_error') {
       setSkillStatus((prev) => ({ ...prev, [event.skillId]: 'error' }));
+      return true;
+    }
+    if (event.type === 'skill_context') {
+      setSkillContexts((prev) => ({ ...prev, [event.skillId]: event.context }));
       return true;
     }
     if (event.type === 'tool_call_start') {
@@ -297,6 +302,7 @@ export default function Home() {
     setLoadingDocs(NONE_LOADING);
     setSkillStatus(EMPTY_SKILL_STATUS);
     setToolCalls(EMPTY_TOOL_CALLS);
+    setSkillContexts({});
     setError(null);
     setLoadingStep('');
     setIsLoading(false);
@@ -361,6 +367,7 @@ export default function Home() {
             onStartOver={handleStartOver}
             skillStatus={skillStatus}
             toolCalls={toolCalls}
+            skillContexts={skillContexts}
           />
         )}
       </main>

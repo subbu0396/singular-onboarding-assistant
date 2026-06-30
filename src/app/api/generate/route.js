@@ -519,6 +519,21 @@ async function runSkill(client, skill, form, send, { skipLifecycle = false } = {
 async function runSkill5CalendarAgent(client, form, calendarContext, send) {
   const skillId = 'timeline';
   send({ type: 'skill_start', skillId });
+  // Push a structured context summary to the pipeline UI so the SE can
+  // see at-a-glance which signals fed the timeline analysis (engineering
+  // busy minutes, SE busy minutes, SE-provided notes).
+  send({
+    type: 'skill_context',
+    skillId,
+    context: {
+      source: calendarContext?.source || 'calendar',
+      window: calendarContext?.window || null,
+      engineering: calendarContext?.engineering_calendar || null,
+      se: calendarContext?.se_calendar || null,
+      seNotes: form?.seAvailabilityNotes?.trim() || null,
+      targetGoLiveDate: calendarContext?.target_go_live_date || form?.targetGoLiveDate || null,
+    },
+  });
   // Surface that we hit a calendar so the UI can show a tool badge,
   // mirroring how Skill 1 surfaces Salesforce.
   send({
@@ -670,6 +685,20 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
           id: skill.id,
           output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
         };
+      }
+      if (skill.id === 'timeline' && form?.seAvailabilityNotes?.trim()) {
+        // No calendar connected but the SE typed availability notes — still
+        // surface those in the pipeline UI so the SE can see what fed the
+        // timeline analysis even without Google Calendar.
+        send({
+          type: 'skill_context',
+          skillId: 'timeline',
+          context: {
+            source: 'se_notes_only',
+            seNotes: form.seAvailabilityNotes.trim(),
+            targetGoLiveDate: form?.targetGoLiveDate || null,
+          },
+        });
       }
       return { id: skill.id, output: await runSkill(client, skill, form, send) };
     })

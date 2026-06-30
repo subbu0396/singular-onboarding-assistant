@@ -22,6 +22,7 @@ export default function ResultsTabs({
   onStartOver,
   skillStatus,
   toolCalls,
+  skillContexts,
 }) {
   const hasSkillActivity =
     skillStatus &&
@@ -66,6 +67,7 @@ export default function ResultsTabs({
       <SkillProgress
         skillStatus={skillStatus}
         toolCalls={toolCalls}
+        skillContexts={skillContexts}
         visible={hasSkillActivity}
       />
 
