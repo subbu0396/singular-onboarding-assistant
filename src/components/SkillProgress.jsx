@@ -74,7 +74,61 @@ function ToolBadge({ call }) {
   );
 }
 
-export default function SkillProgress({ skillStatus = {}, toolCalls = {}, visible = true }) {
+function ContextStat({ label, value }) {
+  return (
+    <span className="inline-flex items-baseline gap-1 rounded bg-slate-800/60 px-1.5 py-0.5 text-[10px] text-slate-300">
+      <span className="text-slate-500">{label}</span>
+      <span className="font-medium">{value}</span>
+    </span>
+  );
+}
+
+function SkillContextPanel({ context }) {
+  if (!context) return null;
+  const eng = context.engineering;
+  const se = context.se;
+  const goLive = context.targetGoLiveDate;
+  return (
+    <div className="mt-1 flex flex-col gap-1 rounded bg-slate-950/40 px-2 py-1.5 text-[10px]">
+      {goLive && (
+        <span className="text-slate-500">
+          Go-live: <span className="text-slate-300">{goLive}</span>
+        </span>
+      )}
+      {(eng || se) && (
+        <div className="flex flex-wrap gap-1">
+          {eng && (
+            <ContextStat
+              label="Eng busy:"
+              value={`${eng.total_busy_minutes ?? 0}m`}
+            />
+          )}
+          {se && (
+            <ContextStat
+              label="SE busy:"
+              value={`${se.total_busy_minutes ?? 0}m`}
+            />
+          )}
+        </div>
+      )}
+      {context.seNotes && (
+        <p
+          className="line-clamp-3 italic text-slate-400"
+          title={context.seNotes}
+        >
+          “{context.seNotes}”
+        </p>
+      )}
+    </div>
+  );
+}
+
+export default function SkillProgress({
+  skillStatus = {},
+  toolCalls = {},
+  skillContexts = {},
+  visible = true,
+}) {
   if (!visible) return null;
   return (
     <div className="mb-6 rounded-xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
@@ -88,6 +142,7 @@ export default function SkillProgress({ skillStatus = {}, toolCalls = {}, visibl
         {SKILLS.map((skill, idx) => {
           const state = skillStatus[skill.id] || 'pending';
           const calls = toolCalls[skill.id] || [];
+          const context = skillContexts[skill.id];
           return (
             <li
               key={skill.id}
@@ -104,6 +159,11 @@ export default function SkillProgress({ skillStatus = {}, toolCalls = {}, visibl
                   {calls.map((call) => (
                     <ToolBadge key={call.toolName} call={call} />
                   ))}
+                </div>
+              )}
+              {context && (
+                <div className="pl-6">
+                  <SkillContextPanel context={context} />
                 </div>
               )}
             </li>
