@@ -112,6 +112,15 @@ const REVIEW_SKILL_ID = 'review_compile';
 // Skill 1 runs as a tool-using agent loop. The other skills (2-5) use the
 // simpler runSkill path below.
 async function runSkill1Agent(client, form, sfSession, send) {
+  console.log('runSkill1Agent enter — types:', {
+    client: typeof client,
+    clientMessages: typeof client?.messages,
+    clientMessagesCreate: typeof client?.messages?.create,
+    form: typeof form,
+    send: typeof send,
+    Anthropic: typeof Anthropic,
+    AnthropicAPIError: typeof Anthropic?.APIError,
+  });
   const skillId = 'client_info';
   send({ type: 'skill_start', skillId });
 
