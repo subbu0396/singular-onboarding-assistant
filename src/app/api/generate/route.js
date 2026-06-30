@@ -166,7 +166,11 @@ async function runSkill1Agent(client, form, sfSession, send) {
           skillId,
           message: 'Refused by safety filters.',
         });
-        return null;
+        return {
+          output: null,
+          refreshedSession:
+            sessionRef.current !== sfSession ? sessionRef.current : null,
+        };
       }
 
       // Accumulate text from this turn.
@@ -507,6 +511,7 @@ function buildSSEStream(work) {
         await work(send);
         send({ type: 'done' });
       } catch (err) {
+        console.error('Generation pipeline error:', err?.stack || err);
         send({ type: 'error', message: err?.message || 'Generation failed' });
       } finally {
         controller.close();
