@@ -142,6 +142,7 @@ export const INITIAL_FORM_STATE = {
   targetGoLiveDate: '',
   onboardingUrgency: '',
   seAvailabilityNotes: '',
+  engineeringAvailabilityNotes: '',
 };
 
 function formatDateInput(date) {
@@ -184,7 +185,7 @@ export const SECTION_FIELDS = {
   sdkSetup: ['platforms', 'currentMmp', 'attributionModel'],
   integrationType: ['integrationMethods', 'dataExportMethods', 'eventTrackingMethod'],
   techEnvironment: ['backendLanguage', 'hasDataWarehouse', 'usesCdp', 'cdpName', 'authMethod'],
-  timeline: ['targetGoLiveDate', 'onboardingUrgency', 'seAvailabilityNotes'],
+  timeline: ['targetGoLiveDate', 'onboardingUrgency', 'seAvailabilityNotes', 'engineeringAvailabilityNotes'],
 };
 
 export function getSectionDefaults(sectionKey) {

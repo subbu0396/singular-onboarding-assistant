@@ -14,6 +14,20 @@ const STATE_STYLES = {
   error: 'border-red-700 bg-red-500/10 text-red-300',
 };
 
+// Risk-based card colors override the normal "complete" green for skills
+// whose context emits a riskLevel — currently just the Go-Live Timeline.
+const RISK_STYLES = {
+  green: 'border-emerald-700 bg-emerald-500/10 text-emerald-300',
+  amber: 'border-amber-600 bg-amber-500/10 text-amber-300',
+  red: 'border-red-700 bg-red-500/15 text-red-300',
+};
+
+const RISK_LABELS = {
+  green: 'on track',
+  amber: 'at risk',
+  red: 'go-live at risk',
+};
+
 const TOOL_LABELS = {
   lookup_salesforce_client: 'Salesforce',
   use_form_data: 'Form data',
@@ -88,12 +102,22 @@ function SkillContextPanel({ context }) {
   const eng = context.engineering;
   const se = context.se;
   const goLive = context.targetGoLiveDate;
+  const risk = context.riskLevel;
   return (
     <div className="mt-1 flex flex-col gap-1 rounded bg-slate-950/40 px-2 py-1.5 text-[10px]">
-      {goLive && (
-        <span className="text-slate-500">
-          Go-live: <span className="text-slate-300">{goLive}</span>
-        </span>
+      {(goLive || risk) && (
+        <div className="flex items-center gap-2">
+          {goLive && (
+            <span className="text-slate-500">
+              Go-live: <span className="text-slate-300">{goLive}</span>
+            </span>
+          )}
+          {risk && (
+            <span className="font-medium uppercase tracking-wider">
+              {RISK_LABELS[risk] || risk}
+            </span>
+          )}
+        </div>
       )}
       {(eng || se) && (
         <div className="flex flex-wrap gap-1">
@@ -113,10 +137,18 @@ function SkillContextPanel({ context }) {
       )}
       {context.seNotes && (
         <p
-          className="line-clamp-3 italic text-slate-400"
+          className="line-clamp-2 italic text-slate-400"
           title={context.seNotes}
         >
-          “{context.seNotes}”
+          <span className="not-italic text-slate-500">SE: </span>“{context.seNotes}”
+        </p>
+      )}
+      {context.engNotes && (
+        <p
+          className="line-clamp-2 italic text-slate-400"
+          title={context.engNotes}
+        >
+          <span className="not-italic text-slate-500">Eng: </span>“{context.engNotes}”
         </p>
       )}
     </div>
@@ -143,10 +175,17 @@ export default function SkillProgress({
           const state = skillStatus[skill.id] || 'pending';
           const calls = toolCalls[skill.id] || [];
           const context = skillContexts[skill.id];
+          // Risk-based color overrides the default state color once a
+          // riskLevel has been emitted — keeps the card amber/red even
+          // after the skill completes, which is the whole point.
+          const cardClass =
+            context?.riskLevel && state !== 'pending' && state !== 'error'
+              ? RISK_STYLES[context.riskLevel] || STATE_STYLES[state]
+              : STATE_STYLES[state];
           return (
             <li
               key={skill.id}
-              className={`flex flex-col gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${STATE_STYLES[state]}`}
+              className={`flex flex-col gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${cardClass}`}
             >
               <div className="flex items-center gap-2">
                 <span className="flex h-4 w-4 items-center justify-center">

@@ -66,7 +66,7 @@ export const SKILLS = [
   {
     id: 'timeline',
     name: 'Go-Live Timeline',
-    fields: ['targetGoLiveDate', 'onboardingUrgency', 'seAvailabilityNotes'],
+    fields: ['targetGoLiveDate', 'onboardingUrgency', 'seAvailabilityNotes', 'engineeringAvailabilityNotes'],
     focus:
       'Surface timeline feasibility given the stack complexity, recommend a phased rollout if appropriate, and call out the risk areas most likely to slip the date.',
   },
@@ -249,6 +249,8 @@ Three possible sources of timeline context — use whichever are present:
    - Call out specific concerns: "Engineering has X busy minutes in the 14 days before the target, suggesting limited bandwidth for SDK escalations."
 
 2. **SE-provided availability notes** (form field seAvailabilityNotes). When non-empty, treat this as the SE's authoritative statement of when they personally can run kickoff/cutover/escalation calls. Weave concrete callouts ("SE indicated PTO 5–9 Aug — schedule the smoke-test window outside that range"). Prefer the SE's notes over the calendar when they conflict — the SE knows commitments the calendar doesn't.
+
+2a. **Engineering team availability notes** (form field engineeringAvailabilityNotes). When non-empty, treat this as authoritative for engineering capacity — code freezes, sprint commitments, key engineer PTO, escalation bandwidth. Quote specifics ("mobile team in code freeze 12–16 Aug means SDK integration must complete by 9 Aug or slip to the following sprint"). When engg notes contradict calendar busy minutes, prefer the notes.
 
 3. **Form slice only** (stack complexity, urgency, target date). When neither calendar nor SE notes are present, fall back to general timeline analysis based on these, and explicitly say "Calendar data and SE availability notes not available — analysis based on stack complexity only."
 
