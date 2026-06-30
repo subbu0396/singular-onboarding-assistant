@@ -12,9 +12,13 @@ const AUTH_HOST = 'https://auth.atlassian.com';
 const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
 const ME_URL = 'https://api.atlassian.com/me';
 
-// Atlassian retired the /v1/sse endpoint on 30 June 2026 in favour of
-// /v1/mcp/authv2. Env-overridable for future moves.
-export const DEFAULT_ATLASSIAN_MCP_URL = 'https://mcp.atlassian.com/v1/mcp/authv2';
+// Atlassian retired the /v1/sse endpoint on 30 June 2026. Two replacements
+// exist: /v1/mcp/authv2 (OAuth 2.1 + Dynamic Client Registration) and
+// /v1/mcp (accepts a pre-obtained bearer token via Authorization header).
+// We use /v1/mcp because we already hold a standard OAuth 2.0 (3LO) token
+// from our own auth flow — the authv2 endpoint expects a DCR-issued token
+// and silently hangs on requests with a 3LO bearer. Env-overridable.
+export const DEFAULT_ATLASSIAN_MCP_URL = 'https://mcp.atlassian.com/v1/mcp';
 
 // Default to a read-only Confluence scope set. Override with
 // ATLASSIAN_OAUTH_SCOPES (space-separated) to broaden (e.g. add Jira).
