@@ -17,7 +17,21 @@ const STATE_STYLES = {
 const TOOL_LABELS = {
   lookup_salesforce_client: 'Salesforce',
   use_form_data: 'Form data',
+  mcp_tool: 'Confluence',
 };
+
+// Atlassian MCP tool names are namespaced (e.g. "atlassian.searchConfluence");
+// surface a friendly label for any tool whose name hints at Confluence search
+// or page-fetch operations, and fall back to the raw name otherwise.
+function labelForTool(toolName) {
+  if (TOOL_LABELS[toolName]) return TOOL_LABELS[toolName];
+  const lower = toolName.toLowerCase();
+  if (lower.includes('search') && lower.includes('confluence')) return 'Confluence: search';
+  if (lower.includes('page') && lower.includes('confluence')) return 'Confluence: page';
+  if (lower.includes('confluence')) return 'Confluence';
+  if (lower.includes('atlassian')) return 'Atlassian';
+  return toolName;
+}
 
 function StateIndicator({ state, index }) {
   if (state === 'complete') return <span>✓</span>;
@@ -31,7 +45,7 @@ function StateIndicator({ state, index }) {
 }
 
 function ToolBadge({ call }) {
-  const label = TOOL_LABELS[call.toolName] || call.toolName;
+  const label = labelForTool(call.toolName);
   if (call.status === 'running') {
     return (
       <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">

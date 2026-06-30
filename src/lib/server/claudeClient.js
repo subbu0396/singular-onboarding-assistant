@@ -157,6 +157,50 @@ export function buildFormSlice(skill, form) {
 
 export { SKILL1_SYSTEM_BLOCK };
 
+// --- Skill 4: Technical Environment (Atlassian/Confluence MCP agent) ---
+//
+// Phase 3: when the SE has connected their Atlassian account, Skill 4 calls
+// Claude with the mcp_servers connector pointing at the Atlassian Rovo MCP
+// server. Claude decides which Confluence tools to invoke (search, fetch
+// page) based on the form's tech-environment slice. When Atlassian is not
+// connected, Skill 4 falls back to the simpler static-prompt path used by
+// skills 2, 3, 5.
+
+const SKILL4_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are the Technical Environment skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused technical analysis covering: backend-language SDK availability, warehouse landing patterns, CDP coexistence, and auth-method implications for postbacks and exports.
+
+You have access to Confluence (via the Atlassian MCP server) containing internal integration runbooks, architecture patterns, and SE-authored notes from prior onboardings.
+
+Process:
+1. Derive 1-3 short search queries from the client's tech slice (backend language, warehouse presence, CDP name, auth method). Example queries: "Node.js MMP SDK installation", "Snowflake export landing schema", "Segment CDP coexistence", "OAuth client-credentials postback".
+2. Search Confluence using those queries. Open the most relevant 1-2 pages.
+3. Synthesize the page contents with the form's tech slice into the analysis. Where you pulled a specific operational pattern from a page, name the page title inline (e.g., "Per the 'Snowflake landing schema' runbook, ...").
+4. If a search returns nothing relevant, do not invent content from the page titles alone — fall back to general best-practice analysis and say so.
+
+Output rules:
+- 120-220 words, plain prose, no markdown headers, no bullet lists.
+- No preamble ("Here is the analysis...") and no closing summary.
+- Do not write the runbook, FAQ, or checklist itself — this is intermediate context for a downstream compilation step.
+- Three Confluence tool calls is the maximum you should need.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+export function buildSkill4UserPrompt(form) {
+  const skill = SKILLS.find((s) => s.id === 'tech_env');
+  const slice = buildFormSlice(skill, form);
+  return `Produce the Technical Environment section analysis.
+
+Target MMP: ${getPlatform(form)}
+
+Client tech slice:
+${JSON.stringify(slice, null, 2)}
+
+Search Confluence for runbooks and patterns that fit this stack, then produce the analysis. Cite page titles inline when you pull from one.`;
+}
+
+export { SKILL4_SYSTEM_BLOCK };
+
 function buildSkillUserPrompt(skill, form) {
   const slice = Object.fromEntries(skill.fields.map((f) => [f, form[f]]));
   const platform = getPlatform(form);

@@ -10,18 +10,30 @@ import {
   SKILL_SYSTEM_BLOCK,
   SKILL1_SYSTEM_BLOCK,
   SKILL1_TOOLS,
+  SKILL4_SYSTEM_BLOCK,
   buildSkillUserPrompt,
   buildSkill1UserPrompt,
+  buildSkill4UserPrompt,
   buildFormSlice,
 } from '@/lib/server/claudeClient';
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
-import { readSession } from '@/lib/server/session';
+import {
+  ensureFreshAtlassianSession,
+  getMcpUrl,
+} from '@/lib/server/atlassian';
+import {
+  readSession,
+  readAtlassianSession,
+  buildAtlassianSessionCookie,
+} from '@/lib/server/session';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 6000;
 const SKILL_MAX_TOKENS = 1500;
 const SKILL1_MAX_ITERATIONS = 4;
+const MCP_BETA = 'mcp-client-2025-11-20';
+const ATLASSIAN_MCP_SERVER_NAME = 'atlassian';
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -256,6 +268,108 @@ async function runSkill1Agent(client, form, sfSession, send) {
   }
 }
 
+// Skill 4: when Atlassian is connected, run via Anthropic's MCP connector
+// against the Atlassian Rovo MCP server. Otherwise fall back to the static
+// runSkill path so onboarding still works without Atlassian set up.
+async function runSkill4McpAgent(client, form, atlSession, send) {
+  const skillId = 'tech_env';
+  send({ type: 'skill_start', skillId });
+
+  let output = '';
+  // Track the active MCP tool_use block so we can complete it by the same
+  // toolName the start event used (the UI matches running calls by name).
+  const activeMcpToolByIndex = new Map();
+
+  try {
+    const stream = client.beta.messages.stream({
+      model: MODEL,
+      max_tokens: SKILL_MAX_TOKENS,
+      system: [SKILL4_SYSTEM_BLOCK],
+      messages: [{ role: 'user', content: buildSkill4UserPrompt(form) }],
+      mcp_servers: [
+        {
+          type: 'url',
+          url: getMcpUrl(),
+          name: ATLASSIAN_MCP_SERVER_NAME,
+          authorization_token: atlSession.access_token,
+        },
+      ],
+      tools: [{ type: 'mcp_toolset', mcp_server_name: ATLASSIAN_MCP_SERVER_NAME }],
+      betas: [MCP_BETA],
+    });
+
+    for await (const event of stream) {
+      // Surface MCP tool calls to the UI as they're issued so the
+      // SkillProgress badge lights up per tool — same pattern Skill 1 uses.
+      if (
+        event.type === 'content_block_start' &&
+        event.content_block?.type === 'mcp_tool_use'
+      ) {
+        const toolName = event.content_block.name || 'mcp_tool';
+        activeMcpToolByIndex.set(event.index, toolName);
+        send({
+          type: 'tool_call_start',
+          skillId,
+          toolName,
+          input: event.content_block.input || {},
+        });
+      }
+      if (
+        event.type === 'content_block_stop' &&
+        activeMcpToolByIndex.has(event.index)
+      ) {
+        const toolName = activeMcpToolByIndex.get(event.index);
+        activeMcpToolByIndex.delete(event.index);
+        send({
+          type: 'tool_call_complete',
+          skillId,
+          toolName,
+          ok: true,
+        });
+      }
+      if (
+        event.type === 'content_block_delta' &&
+        event.delta?.type === 'text_delta'
+      ) {
+        output += event.delta.text;
+      }
+    }
+
+    const final = await stream.finalMessage();
+    if (final.stop_reason === 'refusal') {
+      send({
+        type: 'skill_error',
+        skillId,
+        message: 'Refused by safety filters.',
+      });
+      return null;
+    }
+
+    send({ type: 'skill_complete', skillId });
+    return output.trim() || null;
+  } catch (err) {
+    // If the MCP server itself rejects the token (401) or anything else goes
+    // sideways, fall through to the static prompt so the onboarding still
+    // completes. Close any tool badges still showing as running.
+    for (const [, toolName] of activeMcpToolByIndex) {
+      send({
+        type: 'tool_call_complete',
+        skillId,
+        toolName,
+        ok: false,
+        message: err?.message || 'MCP call failed',
+      });
+    }
+    activeMcpToolByIndex.clear();
+    const message =
+      err instanceof Anthropic.APIError
+        ? `Skill 4 MCP call failed (${err.status}): ${err.message}`
+        : err?.message || 'Skill 4 MCP call failed';
+    console.error('Skill 4 MCP error — falling back to static prompt', message);
+    return null;
+  }
+}
+
 async function runSkill(client, skill, form, send) {
   send({ type: 'skill_start', skillId: skill.id });
   try {
@@ -338,15 +452,21 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
   }
 }
 
-async function runAgent(client, form, ragContext, docTypes, sfSession, send) {
-  // Skills 1-5 run in parallel — no inter-skill dependencies in Phase 1.
-  // Skill 1 is the tool-using agent (Salesforce + form fallback); 2-5 are
-  // static analytical prompts.
+async function runAgent(client, form, ragContext, docTypes, sfSession, atlSession, send) {
+  // Skills 1-5 run in parallel — no inter-skill dependencies.
+  // Skill 1: Salesforce tool-using agent (Phase 2).
+  // Skill 4: Confluence MCP agent (Phase 3) when Atlassian is connected;
+  //          falls back to the static runSkill path when it isn't or fails.
   const skillResults = await Promise.all(
     SKILLS.map(async (skill) => {
       if (skill.id === 'client_info') {
         const { output } = await runSkill1Agent(client, form, sfSession, send);
         return { id: skill.id, output };
+      }
+      if (skill.id === 'tech_env' && atlSession?.access_token) {
+        const mcpOutput = await runSkill4McpAgent(client, form, atlSession, send);
+        if (mcpOutput) return { id: skill.id, output: mcpOutput };
+        // MCP path returned null (refusal / error) — fall through to static.
       }
       return { id: skill.id, output: await runSkill(client, skill, form, send) };
     })
@@ -401,6 +521,15 @@ export async function POST(req) {
   const body = await req.json();
   const client = new Anthropic({ apiKey });
   const sfSession = await readSession(req);
+  const storedAtlSession = await readAtlassianSession(req);
+  const { session: atlSession, refreshedSession: atlRefreshed } =
+    await ensureFreshAtlassianSession(storedAtlSession);
+
+  // Headers we may append refreshed-session Set-Cookies onto.
+  const extraHeaders = new Headers(SSE_HEADERS);
+  if (atlRefreshed) {
+    extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(atlRefreshed));
+  }
 
   // Single-doc (regenerate) path — runs the full skill pipeline but only
   // streams the requested doc. Keeps doc quality consistent with the
@@ -421,11 +550,12 @@ export async function POST(req) {
         ragContext,
         [body.docType],
         sfSession,
+        atlSession,
         send
       );
     });
 
-    return new Response(stream, { headers: SSE_HEADERS });
+    return new Response(stream, { headers: extraHeaders });
   }
 
   // Full generation path: skills 1-5 in parallel, then all three docs.
@@ -438,9 +568,10 @@ export async function POST(req) {
       ragContext,
       ['runbook', 'faq', 'checklist'],
       sfSession,
+      atlSession,
       send
     );
   });
 
-  return new Response(stream, { headers: SSE_HEADERS });
+  return new Response(stream, { headers: extraHeaders });
 }
