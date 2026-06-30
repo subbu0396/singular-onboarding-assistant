@@ -7,9 +7,7 @@ import {
 } from '@/lib/server/session';
 import {
   buildSessionFromTokenResponse,
-  exchangeCodeForToken,
-  fetchAccessibleResources,
-  fetchIdentity,
+  exchangeCodeForMcpToken,
   isAtlassianOAuthConfigured,
 } from '@/lib/server/atlassian';
 
@@ -34,9 +32,12 @@ async function handleCallback(req) {
   if (oauthError) return errorRedirect(req, `atlassian_${oauthError}`);
   if (!code || !state) return errorRedirect(req, 'missing_code_or_state');
 
-  const expectedState = await readAtlassianStateCookie(req);
-  if (!expectedState || expectedState !== state) {
+  const expected = await readAtlassianStateCookie(req);
+  if (!expected?.state || expected.state !== state) {
     return errorRedirect(req, 'state_mismatch');
+  }
+  if (!expected.verifier || !expected.client_id) {
+    return errorRedirect(req, 'state_cookie_incomplete');
   }
 
   if (!isAtlassianOAuthConfigured()) {
@@ -44,17 +45,21 @@ async function handleCallback(req) {
   }
 
   const redirectUri = process.env.ATLASSIAN_REDIRECT_URI;
-  const token = await exchangeCodeForToken({ code, redirectUri });
-  if (!token?.access_token) return errorRedirect(req, 'token_exchange_failed');
+  let token;
+  try {
+    token = await exchangeCodeForMcpToken({
+      code,
+      redirectUri,
+      clientId: expected.client_id,
+      codeVerifier: expected.verifier,
+    });
+  } catch (err) {
+    console.error('Atlassian MCP token exchange failed:', err?.message || err);
+    return errorRedirect(req, 'token_exchange_failed');
+  }
+  if (!token?.access_token) return errorRedirect(req, 'token_response_missing');
 
-  // Best-effort identity + accessible-resources lookups for the UI badge
-  // and so we know which cloud_id to surface. Both are non-fatal.
-  const [identity, resources] = await Promise.all([
-    fetchIdentity(token.access_token),
-    fetchAccessibleResources(token.access_token),
-  ]);
-
-  const sessionPayload = buildSessionFromTokenResponse(token, identity, resources);
+  const sessionPayload = buildSessionFromTokenResponse(token, expected.client_id);
   const sessionCookie = await buildAtlassianSessionCookie(sessionPayload);
   const clearStateCookie = buildClearAtlassianStateCookie();
 
@@ -78,7 +83,7 @@ export async function GET(req) {
       {
         error: 'Atlassian callback failed.',
         detail: err?.message || String(err),
-        hint: 'Common causes: SESSION_SECRET not set or wrong size, OAuth app callback URL mismatch.',
+        hint: 'Common causes: SESSION_SECRET not set or wrong size, state cookie expired, MCP token endpoint unreachable.',
       },
       { status: 500 }
     );

@@ -4,10 +4,9 @@ import { readAtlassianSession } from '@/lib/server/session';
 
 export async function GET(req) {
   const session = await readAtlassianSession(req);
-  if (!session) return Response.json({ connected: false });
+  if (!session?.access_token) return Response.json({ connected: false });
   return Response.json({
     connected: true,
-    identityName: session.identity_name || null,
-    initialExpiresAt: session.initial_expires_at || null,
+    expiresAt: session.expires_at || null,
   });
 }

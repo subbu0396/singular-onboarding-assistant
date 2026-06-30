@@ -201,13 +201,19 @@ export function buildClearAtlassianSessionCookie() {
   return buildClearCookieFor(ATL_SESSION_COOKIE);
 }
 
-export function buildAtlassianStateCookie(state) {
-  return buildStateCookieFor(ATL_STATE_COOKIE, state);
+// Atlassian's MCP OAuth uses DCR + PKCE, so the state cookie has to carry
+// more than just the CSRF state — it also holds the PKCE verifier and the
+// per-login client_id minted by DCR. All three are needed on the callback.
+export async function buildAtlassianStateCookie(payload) {
+  // Accept either a plain state string (legacy) or a full {state, verifier,
+  // client_id} object — the encrypt helper wraps either way.
+  const obj = typeof payload === 'string' ? { state: payload } : payload;
+  const jwt = await encrypt(obj, STATE_MAX_AGE_SECONDS);
+  return `${ATL_STATE_COOKIE}=${jwt}; ${cookieAttrs(STATE_MAX_AGE_SECONDS)}`;
 }
 
 export async function readAtlassianStateCookie(req) {
-  const payload = await readCookieJwt(req, ATL_STATE_COOKIE);
-  return payload?.state || null;
+  return await readCookieJwt(req, ATL_STATE_COOKIE);
 }
 
 export function buildClearAtlassianStateCookie() {

@@ -126,19 +126,15 @@ The "Connect Salesforce" button in the header will then walk you through the OAu
 
 If you want Skill 4's Technical Environment analysis to pull from real Confluence pages via the Atlassian Rovo Remote MCP server instead of falling back to a static prompt:
 
-1. Go to [developer.atlassian.com](https://developer.atlassian.com/console/myapps/) → **Create app** → **OAuth 2.0 (3LO) integration**
-2. Set Callback URL = `http://localhost:3000/api/auth/atlassian/callback` (and your prod URL)
-3. Add the **Confluence Cloud API** to your app and grant read scopes — by default this project asks for: `read:confluence-content.summary`, `read:confluence-content.all`, `read:confluence-space.summary`, `read:confluence-user`, `search:confluence`, `read:me`, `offline_access`. Override the set via `ATLASSIAN_OAUTH_SCOPES` (space-separated) if you want to broaden (e.g. add Jira) or narrow.
-4. Copy the app's client ID and secret into `.env.local`:
+1. Add the callback URL to `.env.local`:
    ```env
-   ATLASSIAN_CLIENT_ID=...
-   ATLASSIAN_CLIENT_SECRET=...
    ATLASSIAN_REDIRECT_URI=http://localhost:3000/api/auth/atlassian/callback
-   # Optional — override default MCP URL or scope set:
-   # ATLASSIAN_MCP_URL=https://mcp.atlassian.com/v1/mcp/authv2
-   # ATLASSIAN_OAUTH_SCOPES="read:confluence-content.all search:confluence offline_access"
    ```
-5. The "Connect Atlassian" button in the header walks the SE through OAuth. After connecting, Skill 4 calls Claude with the [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector) pointed at `https://mcp.atlassian.com/v1/mcp/authv2`, passing the SE's access token. Claude picks Confluence tools (search, page fetch) based on the form's tech slice. If the call fails or Atlassian isn't connected, Skill 4 silently falls back to the static-prompt path so onboarding always completes.
+   That's it for prerequisites — no Atlassian Developer Console app needed. The Rovo MCP server uses OAuth 2.1 + Dynamic Client Registration (RFC 7591) + PKCE, so the project registers a fresh public client at `https://cf.mcp.atlassian.com/v1/register` on every Connect-Atlassian click.
+2. Click "Connect Atlassian" in the header. The SE consents on `mcp.atlassian.com` and the MCP server issues an access token scoped to its tools.
+3. Submit the onboarding form. Skill 4 calls Claude with the [MCP connector](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector) (beta `mcp-client-2025-11-20`) pointed at `https://mcp.atlassian.com/v1/mcp`, passing the SE's MCP access token. Claude picks Confluence tools (search, page fetch) based on the form's tech slice. If the call fails or Atlassian isn't connected, Skill 4 silently falls back to the static-prompt path so onboarding always completes.
+
+The MCP-server endpoints and discovery URLs can be overridden via `ATLASSIAN_MCP_URL`, `ATLASSIAN_MCP_AUTHORIZATION_ENDPOINT`, `ATLASSIAN_MCP_TOKEN_ENDPOINT`, `ATLASSIAN_MCP_REGISTRATION_ENDPOINT` if Atlassian moves them.
 
 ### Seeding the RAG knowledge base (optional)
 

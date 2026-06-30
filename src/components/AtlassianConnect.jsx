@@ -50,12 +50,11 @@ export default function AtlassianConnect() {
   }
 
   if (status.connected) {
-    const identityName = status.identityName || 'Atlassian';
     return (
       <div className="flex items-center gap-2 text-xs">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-700 bg-sky-500/10 px-2.5 py-1 text-sky-300">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400" />
-          Atlassian: {identityName}
+          Atlassian MCP: connected
         </span>
         <button
           type="button"

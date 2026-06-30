@@ -5,11 +5,11 @@ import {
   generateRandomState,
 } from '@/lib/server/session';
 import {
-  getOAuthScopes,
+  generatePkcePair,
+  getAuthorizationEndpoint,
   isAtlassianOAuthConfigured,
+  registerMcpClient,
 } from '@/lib/server/atlassian';
-
-const AUTH_URL = 'https://auth.atlassian.com/authorize';
 
 export async function GET() {
   try {
@@ -17,26 +17,35 @@ export async function GET() {
       return Response.json(
         {
           error:
-            'Atlassian OAuth is not configured. Set ATLASSIAN_CLIENT_ID, ATLASSIAN_CLIENT_SECRET, and ATLASSIAN_REDIRECT_URI in Vercel.',
+            'Atlassian MCP OAuth is not configured. Set ATLASSIAN_REDIRECT_URI in Vercel.',
         },
         { status: 500 }
       );
     }
 
-    const clientId = process.env.ATLASSIAN_CLIENT_ID;
     const redirectUri = process.env.ATLASSIAN_REDIRECT_URI;
 
+    // Dynamic Client Registration on every login — Atlassian's MCP server
+    // requires DCR per RFC 7591, and edge functions don't have stable
+    // server-side storage to cache the resulting client_id across requests.
+    // One extra round-trip (~50ms) per Connect click is an acceptable cost.
+    const client = await registerMcpClient(redirectUri);
+    const { verifier, challenge } = await generatePkcePair();
     const state = generateRandomState();
-    const stateCookie = await buildAtlassianStateCookie(state);
 
-    const authUrl = new URL(AUTH_URL);
-    authUrl.searchParams.set('audience', 'api.atlassian.com');
-    authUrl.searchParams.set('client_id', clientId);
-    authUrl.searchParams.set('scope', getOAuthScopes());
+    const stateCookie = await buildAtlassianStateCookie({
+      state,
+      verifier,
+      client_id: client.client_id,
+    });
+
+    const authUrl = new URL(getAuthorizationEndpoint());
+    authUrl.searchParams.set('response_type', 'code');
+    authUrl.searchParams.set('client_id', client.client_id);
     authUrl.searchParams.set('redirect_uri', redirectUri);
     authUrl.searchParams.set('state', state);
-    authUrl.searchParams.set('response_type', 'code');
-    authUrl.searchParams.set('prompt', 'consent');
+    authUrl.searchParams.set('code_challenge', challenge);
+    authUrl.searchParams.set('code_challenge_method', 'S256');
 
     return new Response(null, {
       status: 302,
@@ -51,7 +60,7 @@ export async function GET() {
       {
         error: 'Atlassian login failed before redirect.',
         detail: err?.message || String(err),
-        hint: 'Common causes: SESSION_SECRET not set or wrong size, ATLASSIAN_* env vars missing for this deployment environment.',
+        hint: 'Common causes: SESSION_SECRET not set or wrong size, ATLASSIAN_REDIRECT_URI missing for this deployment environment, Atlassian MCP DCR endpoint unreachable.',
       },
       { status: 500 }
     );

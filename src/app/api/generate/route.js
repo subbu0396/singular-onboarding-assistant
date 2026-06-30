@@ -18,7 +18,7 @@ import {
 } from '@/lib/server/claudeClient';
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
 import {
-  getAtlassianAccessToken,
+  getMcpAccessToken,
   getMcpUrl,
 } from '@/lib/server/atlassian';
 import {
@@ -551,8 +551,8 @@ export async function POST(req) {
   // silently falls back to its static-prompt path.
   let atlAccessToken = null;
   const extraHeaders = new Headers(SSE_HEADERS);
-  if (atlSession?.refresh_token) {
-    const { accessToken, refreshedSession } = await getAtlassianAccessToken(atlSession);
+  if (atlSession?.access_token) {
+    const { accessToken, refreshedSession } = await getMcpAccessToken(atlSession);
     atlAccessToken = accessToken;
     if (refreshedSession) {
       extraHeaders.append('Set-Cookie', await buildAtlassianSessionCookie(refreshedSession));

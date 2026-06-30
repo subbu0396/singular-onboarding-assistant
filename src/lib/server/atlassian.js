@@ -1,183 +1,189 @@
 // Atlassian (Rovo) Remote MCP integration for Skill 4 (Technical Environment).
 //
-// We do not call the MCP server directly — Anthropic's mcp_servers connector
-// handles the protocol. Our job is OAuth: hold the access token in a JWE
-// cookie, refresh it when it's near expiry, and hand a fresh bearer token to
-// the Messages API as { authorization_token } on each Skill 4 invocation.
+// The Atlassian Rovo MCP server uses OAuth 2.1 + Dynamic Client Registration
+// (RFC 7591) + PKCE. It does NOT accept the standard OAuth 2.0 (3LO) bearer
+// tokens issued by auth.atlassian.com — connection requests silently hang
+// instead of returning a clean 401. So we run the MCP server's OWN OAuth
+// flow: discover its endpoints, register a public client on the fly, redirect
+// the SE through a PKCE-protected authorization, and exchange the code for
+// an access token that's only valid against the MCP server.
 //
-// Confluence/Jira read scopes the demo asks for are env-configurable so a
-// fork can broaden or narrow them without code changes.
+// The discovery document at mcp.atlassian.com/.well-known/oauth-authorization-server
+// is the source of truth — these constants match its current shape but are
+// env-overridable in case Atlassian moves them.
 
-const AUTH_HOST = 'https://auth.atlassian.com';
-const ACCESSIBLE_RESOURCES_URL = 'https://api.atlassian.com/oauth/token/accessible-resources';
-const ME_URL = 'https://api.atlassian.com/me';
+import { base64url } from 'jose';
 
-// Atlassian retired the /v1/sse endpoint on 30 June 2026. Two replacements
-// exist: /v1/mcp/authv2 (OAuth 2.1 + Dynamic Client Registration) and
-// /v1/mcp (accepts a pre-obtained bearer token via Authorization header).
-// We use /v1/mcp because we already hold a standard OAuth 2.0 (3LO) token
-// from our own auth flow — the authv2 endpoint expects a DCR-issued token
-// and silently hangs on requests with a 3LO bearer. Env-overridable.
 export const DEFAULT_ATLASSIAN_MCP_URL = 'https://mcp.atlassian.com/v1/mcp';
 
-// Default to a read-only Confluence scope set. Override with
-// ATLASSIAN_OAUTH_SCOPES (space-separated) to broaden (e.g. add Jira).
-export const DEFAULT_ATLASSIAN_SCOPES = [
-  'read:confluence-content.summary',
-  'read:confluence-content.all',
-  'read:confluence-space.summary',
-  'read:confluence-user',
-  'search:confluence',
-  'read:me',
-  'offline_access',
-].join(' ');
+const DEFAULTS = {
+  authorization_endpoint: 'https://mcp.atlassian.com/v1/authorize',
+  token_endpoint: 'https://cf.mcp.atlassian.com/v1/token',
+  registration_endpoint: 'https://cf.mcp.atlassian.com/v1/register',
+};
 
-// Refresh access tokens this many ms before the stored expiry — covers clock
-// skew and round-trip latency to Anthropic's MCP connector.
 const REFRESH_SKEW_MS = 60 * 1000;
 
 export function getMcpUrl() {
   return process.env.ATLASSIAN_MCP_URL || DEFAULT_ATLASSIAN_MCP_URL;
 }
 
-export function getOAuthScopes() {
-  return process.env.ATLASSIAN_OAUTH_SCOPES || DEFAULT_ATLASSIAN_SCOPES;
+export function getAuthorizationEndpoint() {
+  return process.env.ATLASSIAN_MCP_AUTHORIZATION_ENDPOINT || DEFAULTS.authorization_endpoint;
+}
+
+export function getTokenEndpoint() {
+  return process.env.ATLASSIAN_MCP_TOKEN_ENDPOINT || DEFAULTS.token_endpoint;
+}
+
+export function getRegistrationEndpoint() {
+  return process.env.ATLASSIAN_MCP_REGISTRATION_ENDPOINT || DEFAULTS.registration_endpoint;
 }
 
 export function isAtlassianOAuthConfigured() {
-  return Boolean(
-    process.env.ATLASSIAN_CLIENT_ID &&
-      process.env.ATLASSIAN_CLIENT_SECRET &&
-      process.env.ATLASSIAN_REDIRECT_URI
-  );
+  // DCR means no client_id/secret env vars are required — the only
+  // prerequisite is a redirect URI the MCP server can call back to.
+  return Boolean(process.env.ATLASSIAN_REDIRECT_URI);
 }
 
-export async function exchangeCodeForToken({ code, redirectUri }) {
-  const clientId = process.env.ATLASSIAN_CLIENT_ID;
-  const clientSecret = process.env.ATLASSIAN_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
+// --- PKCE helpers ---
 
-  const res = await fetch(`${AUTH_HOST}/oauth/token`, {
+function randomBytes(n) {
+  const bytes = new Uint8Array(n);
+  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < n; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  return bytes;
+}
+
+export async function generatePkcePair() {
+  // RFC 7636 §4.1: 43-128 chars from [A-Z][a-z][0-9]-._~. base64url of 32
+  // random bytes lands at 43 chars without padding and uses a valid alphabet.
+  const verifier = base64url.encode(randomBytes(32));
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = base64url.encode(new Uint8Array(digest));
+  return { verifier, challenge };
+}
+
+// --- Dynamic Client Registration (RFC 7591) ---
+//
+// Register a fresh public client per OAuth round-trip. The MCP server returns
+// a client_id (and sometimes client_secret + registration_access_token); we
+// only need client_id because we use token_endpoint_auth_method=none + PKCE.
+//
+// This burns one DCR call per Connect-Atlassian click. Atlassian's MCP server
+// hasn't surfaced any DCR rate limits in practice; if that becomes a problem
+// the right fix is a server-side cache of (redirect_uri → client_id), but
+// edge functions don't have stable storage so we'd need Supabase for that.
+
+export async function registerMcpClient(redirectUri) {
+  const res = await fetch(getRegistrationEndpoint(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: 'none',
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      client_name: 'MMP Onboarding Assistant',
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Atlassian MCP DCR failed (${res.status}): ${body}`);
+  }
+
+  const data = await res.json();
+  if (!data.client_id) {
+    throw new Error('Atlassian MCP DCR response missing client_id');
+  }
+  return data;
+}
+
+// --- Token endpoints ---
+
+export async function exchangeCodeForMcpToken({ code, redirectUri, clientId, codeVerifier }) {
+  const res = await fetch(getTokenEndpoint(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
       grant_type: 'authorization_code',
-      client_id: clientId,
-      client_secret: clientSecret,
       code,
       redirect_uri: redirectUri,
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    console.error('Atlassian token exchange failed', res.status, body);
-    return null;
-  }
-
-  return await res.json();
-}
-
-async function refreshAccessToken(refreshToken) {
-  const clientId = process.env.ATLASSIAN_CLIENT_ID;
-  const clientSecret = process.env.ATLASSIAN_CLIENT_SECRET;
-  if (!clientId || !clientSecret || !refreshToken) return null;
-
-  const res = await fetch(`${AUTH_HOST}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'refresh_token',
       client_id: clientId,
-      client_secret: clientSecret,
-      refresh_token: refreshToken,
-    }),
+      code_verifier: codeVerifier,
+    }).toString(),
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    console.error('Atlassian token refresh failed', res.status, body);
+    throw new Error(`Atlassian MCP token exchange failed (${res.status}): ${body}`);
+  }
+
+  return await res.json();
+}
+
+async function refreshMcpToken({ refreshToken, clientId }) {
+  const res = await fetch(getTokenEndpoint(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: clientId,
+    }).toString(),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    console.error('Atlassian MCP refresh failed', res.status, body);
     return null;
   }
 
   return await res.json();
 }
 
-// Fetches the SE's accessible Atlassian sites so we can record a primary
-// cloud_id + site_url for the badge. Best-effort: if it fails the session
-// still works; the MCP server will use the token's bound resources.
-export async function fetchAccessibleResources(accessToken) {
-  try {
-    const res = await fetch(ACCESSIBLE_RESOURCES_URL, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return [];
-    return await res.json();
-  } catch {
-    return [];
-  }
-}
-
-export async function fetchIdentity(accessToken) {
-  try {
-    const res = await fetch(ME_URL, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) return null;
-    const me = await res.json();
-    return {
-      name: me.name || me.nickname || null,
-      email: me.email || null,
-      account_id: me.account_id || null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function buildSessionFromTokenResponse(token, identity, resources) {
-  // Persist only the refresh token + identity. The access token is a 2KB+
-  // JWT with all 7 scopes encoded — even after JWE encryption it pushed
-  // the cookie past the browser's ~4KB per-cookie limit and the cookie
-  // was silently dropped. We refresh on-demand each time Skill 4 needs
-  // an access token (~200ms extra per invocation). Refresh tokens are
-  // opaque and small (~500B), so the cookie stays comfortably under 1KB.
+export function buildSessionFromTokenResponse(token, clientId) {
+  // MCP tokens from Atlassian are opaque and short — fit comfortably in the
+  // session cookie alongside refresh token and client_id.
   const now = Date.now();
-  const primary = resources?.[0] || null;
   return {
+    access_token: token.access_token,
     refresh_token: token.refresh_token || null,
-    // Stamp when the original access_token expires so the badge can warn
-    // the user if they need to re-auth (refresh tokens themselves expire
-    // after long inactivity — Atlassian's default is ~1 year).
-    initial_expires_at: now + (Number(token.expires_in) || 3600) * 1000,
-    identity_name: identity?.name || identity?.email || primary?.name || null,
+    client_id: clientId,
+    expires_at: now + (Number(token.expires_in) || 3600) * 1000,
   };
 }
 
-// Mints a fresh access token from the persisted refresh token. We do this on
-// every request that needs an MCP call rather than persisting the access
-// token in the cookie (it's too large to fit alongside other fields without
-// blowing the 4KB cookie limit).
-//
-// Returns { accessToken, refreshedSession? }:
-//   - accessToken:       null if no session or refresh failed
-//   - refreshedSession:  set when Atlassian rotated the refresh token (rare
-//                        but Atlassian's docs say it can happen) so the
-//                        caller can rewrite the cookie
-export async function getAtlassianAccessToken(session) {
-  if (!session?.refresh_token) return { accessToken: null, refreshedSession: null };
+// Returns { accessToken, refreshedSession? } — accessToken null if the
+// session is missing or refresh failed. Caller rewrites the cookie when
+// refreshedSession is non-null.
+export async function getMcpAccessToken(session) {
+  if (!session?.access_token) return { accessToken: null, refreshedSession: null };
 
-  const refreshed = await refreshAccessToken(session.refresh_token);
+  const expiresAt = Number(session.expires_at) || 0;
+  if (expiresAt - REFRESH_SKEW_MS > Date.now()) {
+    return { accessToken: session.access_token, refreshedSession: null };
+  }
+
+  if (!session.refresh_token || !session.client_id) {
+    return { accessToken: null, refreshedSession: null };
+  }
+
+  const refreshed = await refreshMcpToken({
+    refreshToken: session.refresh_token,
+    clientId: session.client_id,
+  });
   if (!refreshed?.access_token) {
     return { accessToken: null, refreshedSession: null };
   }
 
-  // Atlassian may rotate refresh tokens — only rewrite the cookie if the
-  // refresh token actually changed.
-  const refreshedSession =
-    refreshed.refresh_token && refreshed.refresh_token !== session.refresh_token
-      ? { ...session, refresh_token: refreshed.refresh_token }
-      : null;
-
-  return { accessToken: refreshed.access_token, refreshedSession };
+  const next = buildSessionFromTokenResponse(refreshed, session.client_id);
+  // Atlassian may not return a new refresh token on every refresh — keep the
+  // existing one if absent so the session stays usable past the next cycle.
+  if (!next.refresh_token) next.refresh_token = session.refresh_token;
+  return { accessToken: next.access_token, refreshedSession: next };
 }
