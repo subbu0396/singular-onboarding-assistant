@@ -306,17 +306,17 @@ export default function Home() {
     <div className="min-h-screen bg-slate-950">
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-accent">
+        <div className="mx-auto flex max-w-4xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-5 sm:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-accent">
               <span className="text-sm font-bold text-white">M</span>
             </div>
-            <div>
-              <h1 className="text-lg font-semibold text-white">MMP Onboarding Assistant</h1>
-              <p className="text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-semibold text-white">MMP Onboarding Assistant</h1>
+              <p className="truncate text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
             <SalesforceConnect />
             <AtlassianConnect />
             <GoogleCalendarConnect />

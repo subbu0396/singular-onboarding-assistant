@@ -50,12 +50,18 @@ export default function GoogleCalendarConnect() {
   }
 
   if (status.connected) {
-    const label = status.identity?.email || status.identity?.name || 'Google Calendar';
+    // Trim noisy gmail addresses to just the local part so the badge stays
+    // narrow enough not to crowd the header on common viewport widths.
+    const raw = status.identity?.email || status.identity?.name || 'Google Calendar';
+    const label = typeof raw === 'string' && raw.includes('@') ? raw.split('@')[0] : raw;
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-700 bg-amber-500/10 px-2.5 py-1 text-amber-300">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-          Google: {label}
+        <span
+          title={raw}
+          className="inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-full border border-amber-700 bg-amber-500/10 px-2.5 py-1 text-amber-300"
+        >
+          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+          <span className="truncate">Google: {label}</span>
         </span>
         <button
           type="button"

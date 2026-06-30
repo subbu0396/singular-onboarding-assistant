@@ -59,9 +59,12 @@ export default function SalesforceConnect() {
     const identityName = status.identity?.name || status.identity?.email || 'Salesforce';
     return (
       <div className="flex items-center gap-2 text-xs">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-700 bg-emerald-500/10 px-2.5 py-1 text-emerald-300">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
-          Salesforce: {identityName}
+        <span
+          title={identityName}
+          className="inline-flex max-w-[14rem] items-center gap-1.5 truncate rounded-full border border-emerald-700 bg-emerald-500/10 px-2.5 py-1 text-emerald-300"
+        >
+          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+          <span className="truncate">Salesforce: {identityName}</span>
         </span>
         <button
           type="button"
