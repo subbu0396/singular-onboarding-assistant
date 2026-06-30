@@ -516,13 +516,12 @@ async function runSkill(client, skill, form, send, { skipLifecycle = false } = {
 // around the target go-live date) and run the timeline skill with that
 // context in the prompt. Falls back to the static runSkill path when no
 // calendar is connected or the fetch fails.
-// Risk heuristic for the Go-Live Timeline card. Conservative — would rather
-// flag amber/red and let the SE override than silently green-light a tight
-// slot. Inputs: days remaining, engineering and SE busy minutes inside a
-// ~21-day window, and whether the SE supplied written notes (taken as a
-// signal that someone is paying attention to coverage).
-const TIMELINE_WINDOW_MINUTES = 21 * 8 * 60; // 21 days × 8 working hours
-function computeTimelineRisk({ targetGoLiveDate, engBusyMinutes, seBusyMinutes }) {
+// Heuristic floor — used only if the LLM risk-assessment call below fails.
+// Counts calendar busy minutes against a 21-day window. Misses date-range
+// conflicts buried in free-text notes (e.g. "PTO 5-9 Aug" overlapping
+// go-live week), which is why the LLM assessment is the primary path.
+const TIMELINE_WINDOW_MINUTES = 21 * 8 * 60;
+function computeTimelineRiskHeuristic({ targetGoLiveDate, engBusyMinutes, seBusyMinutes }) {
   const target = targetGoLiveDate ? Date.parse(targetGoLiveDate) : NaN;
   const daysToGoLive = Number.isFinite(target)
     ? Math.max(0, Math.round((target - Date.now()) / (1000 * 60 * 60 * 24)))
@@ -538,6 +537,78 @@ function computeTimelineRisk({ targetGoLiveDate, engBusyMinutes, seBusyMinutes }
   return 'green';
 }
 
+// Primary risk assessment: short, focused Claude call that reads the
+// free-text notes alongside the calendar numbers and outputs a structured
+// {risk_level, rationale}. This catches conflicts the busy-minute heuristic
+// can't see — e.g. "PTO 5-9 Aug" overlapping a 12 Aug go-live.
+const RISK_ASSESSMENT_SYSTEM = `You assess go-live timeline risk for an MMP onboarding. Output ONLY a JSON object: {"risk_level":"green"|"amber"|"red","rationale":"one short sentence"}.
+
+Rules (apply in order):
+1. If ANY date range in se_notes or engineering_notes overlaps the go-live date or the 7 days before/after it → red. Common patterns: "PTO 5-9 Aug", "code freeze 8-12 Aug", "on leave 9-15 Aug". Parse loosely.
+2. If days_to_go_live < 7 → red.
+3. If engineering_busy_minutes or se_busy_minutes exceeds 50% of a 21-day workday window (>3000 minutes) and days_to_go_live < 21 → red.
+4. If days_to_go_live < 14 with any conflict signal → amber.
+5. If busy minutes exceed 30% (>1800) → amber.
+6. Otherwise → green.
+
+Rationale must name the specific conflict that triggered the level (the overlapping date range, the busy minute count, or the tight target).`;
+
+async function assessTimelineRisk(client, form, calendarContext) {
+  const targetGoLiveDate =
+    calendarContext?.target_go_live_date || form?.targetGoLiveDate || null;
+  const target = targetGoLiveDate ? Date.parse(targetGoLiveDate) : NaN;
+  const daysToGoLive = Number.isFinite(target)
+    ? Math.max(0, Math.round((target - Date.now()) / (1000 * 60 * 60 * 24)))
+    : null;
+  const engBusyMinutes = calendarContext?.engineering_calendar?.total_busy_minutes || 0;
+  const seBusyMinutes = calendarContext?.se_calendar?.total_busy_minutes || 0;
+  const seNotes = form?.seAvailabilityNotes?.trim() || '';
+  const engNotes = form?.engineeringAvailabilityNotes?.trim() || '';
+
+  const heuristic = computeTimelineRiskHeuristic({
+    targetGoLiveDate,
+    engBusyMinutes,
+    seBusyMinutes,
+  });
+
+  try {
+    const response = await client.messages.create({
+      model: MODEL,
+      max_tokens: 300,
+      system: RISK_ASSESSMENT_SYSTEM,
+      messages: [
+        {
+          role: 'user',
+          content: JSON.stringify({
+            today: new Date().toISOString().split('T')[0],
+            target_go_live_date: targetGoLiveDate,
+            days_to_go_live: daysToGoLive,
+            engineering_busy_minutes: engBusyMinutes,
+            se_busy_minutes: seBusyMinutes,
+            se_notes: seNotes,
+            engineering_notes: engNotes,
+          }),
+        },
+      ],
+    });
+
+    const text = response.content?.find((b) => b.type === 'text')?.text || '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (['green', 'amber', 'red'].includes(parsed.risk_level)) {
+        return {
+          riskLevel: parsed.risk_level,
+          rationale: typeof parsed.rationale === 'string' ? parsed.rationale : null,
+        };
+      }
+    }
+  } catch (err) {
+    console.error('Timeline risk assessment failed — using heuristic', err?.message || err);
+  }
+  return { riskLevel: heuristic, rationale: null };
+}
+
 async function runSkill5CalendarAgent(client, form, calendarContext, send) {
   const skillId = 'timeline';
   send({ type: 'skill_start', skillId });
@@ -546,8 +617,7 @@ async function runSkill5CalendarAgent(client, form, calendarContext, send) {
   // busy minutes, SE busy minutes, SE-provided notes).
   const targetGoLiveDate =
     calendarContext?.target_go_live_date || form?.targetGoLiveDate || null;
-  const engBusyMinutes = calendarContext?.engineering_calendar?.total_busy_minutes || 0;
-  const seBusyMinutes = calendarContext?.se_calendar?.total_busy_minutes || 0;
+  const { riskLevel, rationale } = await assessTimelineRisk(client, form, calendarContext);
   send({
     type: 'skill_context',
     skillId,
@@ -559,11 +629,8 @@ async function runSkill5CalendarAgent(client, form, calendarContext, send) {
       seNotes: form?.seAvailabilityNotes?.trim() || null,
       engNotes: form?.engineeringAvailabilityNotes?.trim() || null,
       targetGoLiveDate,
-      riskLevel: computeTimelineRisk({
-        targetGoLiveDate,
-        engBusyMinutes,
-        seBusyMinutes,
-      }),
+      riskLevel,
+      riskRationale: rationale,
     },
   });
   // Surface that we hit a calendar so the UI can show a tool badge,
@@ -723,10 +790,10 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         (form?.seAvailabilityNotes?.trim() || form?.engineeringAvailabilityNotes?.trim())
       ) {
         // No calendar connected but the SE typed availability notes — still
-        // surface those in the pipeline UI so the SE can see what fed the
-        // timeline analysis even without Google Calendar. Without busy
-        // minutes the risk falls back to a pure days-to-go-live heuristic.
+        // run the LLM risk assessment on those notes alone so date-range
+        // conflicts (PTO, code freezes) still color the card correctly.
         const targetGoLiveDate = form?.targetGoLiveDate || null;
+        const { riskLevel, rationale } = await assessTimelineRisk(client, form, null);
         send({
           type: 'skill_context',
           skillId: 'timeline',
@@ -735,11 +802,8 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
             seNotes: form.seAvailabilityNotes?.trim() || null,
             engNotes: form.engineeringAvailabilityNotes?.trim() || null,
             targetGoLiveDate,
-            riskLevel: computeTimelineRisk({
-              targetGoLiveDate,
-              engBusyMinutes: 0,
-              seBusyMinutes: 0,
-            }),
+            riskLevel,
+            riskRationale: rationale,
           },
         });
       }
