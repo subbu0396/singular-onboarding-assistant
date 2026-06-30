@@ -66,7 +66,7 @@ export const SKILLS = [
   {
     id: 'timeline',
     name: 'Go-Live Timeline',
-    fields: ['targetGoLiveDate', 'onboardingUrgency'],
+    fields: ['targetGoLiveDate', 'onboardingUrgency', 'seAvailabilityNotes'],
     focus:
       'Surface timeline feasibility given the stack complexity, recommend a phased rollout if appropriate, and call out the risk areas most likely to slip the date.',
   },
@@ -241,12 +241,16 @@ const SKILL5_SYSTEM_BLOCK = {
   type: 'text',
   text: `You are the Go-Live Timeline skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused analysis on timeline feasibility for the client's go-live date.
 
-When a calendar context is provided, ground your analysis in it:
-- engineering_calendar.total_busy_minutes near the go-live date is your primary signal for engineering capacity. High busy minutes in the week before launch = high risk of slippage; low busy minutes = capacity exists. Mention the specific number if it's notable.
-- se_calendar.total_busy_minutes signals how much SE bandwidth is available for client-facing onboarding calls during the window. Flag if it's saturated.
-- Call out specific concerns by name: "Engineering has X busy minutes in the 14 days before the target, suggesting limited bandwidth for SDK escalations" or "The SE's calendar is heavily booked in the launch week — re-check coverage for the cutover call."
+Three possible sources of timeline context — use whichever are present:
 
-When no calendar context is provided, fall back to general timeline analysis based on the stack complexity and urgency in the form, and explicitly say "Calendar data not available — analysis based on stack complexity only."
+1. **Calendar context** (from connected Google/MS Calendar). When provided:
+   - engineering_calendar.total_busy_minutes near the go-live date is your primary signal for engineering capacity. High busy minutes in the week before launch = high risk of slippage; low busy minutes = capacity exists. Mention the specific number if it's notable.
+   - se_calendar.total_busy_minutes signals how much SE bandwidth is available for client-facing onboarding calls during the window. Flag if it's saturated.
+   - Call out specific concerns: "Engineering has X busy minutes in the 14 days before the target, suggesting limited bandwidth for SDK escalations."
+
+2. **SE-provided availability notes** (form field seAvailabilityNotes). When non-empty, treat this as the SE's authoritative statement of when they personally can run kickoff/cutover/escalation calls. Weave concrete callouts ("SE indicated PTO 5–9 Aug — schedule the smoke-test window outside that range"). Prefer the SE's notes over the calendar when they conflict — the SE knows commitments the calendar doesn't.
+
+3. **Form slice only** (stack complexity, urgency, target date). When neither calendar nor SE notes are present, fall back to general timeline analysis based on these, and explicitly say "Calendar data and SE availability notes not available — analysis based on stack complexity only."
 
 Output rules:
 - 120-220 words of plain prose, no markdown headers, no bullet lists.
