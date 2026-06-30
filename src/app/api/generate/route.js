@@ -467,22 +467,39 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
 }
 
 async function runAgent(client, form, ragContext, docTypes, sfSession, atlAccessToken, apiKey, send) {
+  console.log('runAgent enter:', {
+    docTypes,
+    hasClient: !!client,
+    hasSf: !!sfSession,
+    hasAtl: !!atlAccessToken,
+    skillCount: SKILLS.length,
+  });
   // Skills 1-5 run in parallel — no inter-skill dependencies.
   // Skill 1: Salesforce tool-using agent (Phase 2).
   // Skill 4: Confluence MCP agent (Phase 3) when Atlassian is connected;
   //          falls back to the static runSkill path when it isn't or fails.
   const skillResults = await Promise.all(
     SKILLS.map(async (skill) => {
-      if (skill.id === 'client_info') {
-        const { output } = await runSkill1Agent(client, form, sfSession, send);
-        return { id: skill.id, output };
+      try {
+        if (skill.id === 'client_info') {
+          const result = await runSkill1Agent(client, form, sfSession, send);
+          console.log(`skill ${skill.id} returned:`, typeof result, result === null);
+          const { output } = result || {};
+          return { id: skill.id, output };
+        }
+        if (skill.id === 'tech_env' && atlAccessToken) {
+          const mcpOutput = await runSkill4McpAgent(form, atlAccessToken, apiKey, send);
+          console.log(`skill ${skill.id} MCP returned:`, typeof mcpOutput);
+          if (mcpOutput) return { id: skill.id, output: mcpOutput };
+          // MCP path returned null (refusal / error) — fall through to static.
+        }
+        const out = await runSkill(client, skill, form, send);
+        console.log(`skill ${skill.id} static returned:`, typeof out);
+        return { id: skill.id, output: out };
+      } catch (err) {
+        console.error(`skill ${skill.id} threw:`, err?.stack || err);
+        throw err;
       }
-      if (skill.id === 'tech_env' && atlAccessToken) {
-        const mcpOutput = await runSkill4McpAgent(form, atlAccessToken, apiKey, send);
-        if (mcpOutput) return { id: skill.id, output: mcpOutput };
-        // MCP path returned null (refusal / error) — fall through to static.
-      }
-      return { id: skill.id, output: await runSkill(client, skill, form, send) };
     })
   );
 
