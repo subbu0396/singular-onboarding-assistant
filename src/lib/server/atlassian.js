@@ -280,29 +280,30 @@ export async function buildConfluenceContextForSkill4(session, form, emitTool) {
   const queries = deriveConfluenceQueries(form);
   const seenPageIds = new Set();
   const pages = [];
+  let searchOk = false;
+  let pageFetchStarted = false;
+
+  if (queries.length) {
+    emitTool?.('start', 'searchConfluence', { queries });
+  }
 
   for (const query of queries) {
-    const toolName = 'searchConfluence';
-    emitTool?.('start', toolName, { query });
     try {
       const hits = await searchConfluence(session, cloudId, query, 2);
-      emitTool?.('complete', toolName, { ok: true });
+      searchOk = true;
 
       for (const hit of hits) {
         if (!hit.id || seenPageIds.has(hit.id)) continue;
         seenPageIds.add(hit.id);
 
-        const fetchTool = 'getConfluencePage';
-        emitTool?.('start', fetchTool, { pageId: hit.id, title: hit.title });
+        if (!pageFetchStarted) {
+          emitTool?.('start', 'getConfluencePage', { pageId: hit.id, title: hit.title });
+          pageFetchStarted = true;
+        }
         try {
           const page = await fetchConfluencePage(session, cloudId, hit.id);
           pages.push(page);
-          emitTool?.('complete', fetchTool, { ok: true });
         } catch (err) {
-          emitTool?.('complete', fetchTool, {
-            ok: false,
-            message: err?.message || 'Page fetch failed',
-          });
           if (hit.excerpt) {
             pages.push({ id: hit.id, title: hit.title, excerpt: hit.excerpt.slice(0, 1500) });
           }
@@ -310,14 +311,18 @@ export async function buildConfluenceContextForSkill4(session, form, emitTool) {
 
         if (pages.length >= 2) break;
       }
-    } catch (err) {
-      emitTool?.('complete', toolName, {
-        ok: false,
-        message: err?.message || 'Search failed',
-      });
+    } catch {
+      // try remaining queries
     }
 
     if (pages.length >= 2) break;
+  }
+
+  if (queries.length) {
+    emitTool?.('complete', 'searchConfluence', { ok: searchOk });
+  }
+  if (pageFetchStarted) {
+    emitTool?.('complete', 'getConfluencePage', { ok: pages.length > 0 });
   }
 
   return { cloudId, queries, pages, searched: queries.length > 0 };

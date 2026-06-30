@@ -98,8 +98,8 @@ export default function SkillProgress({ skillStatus = {}, toolCalls = {}, visibl
               </div>
               {calls.length > 0 && (
                 <div className="flex flex-wrap gap-1 pl-6">
-                  {calls.map((call, i) => (
-                    <ToolBadge key={i} call={call} />
+                  {calls.map((call) => (
+                    <ToolBadge key={call.toolName} call={call} />
                   ))}
                 </div>
               )}

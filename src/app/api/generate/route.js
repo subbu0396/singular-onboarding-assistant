@@ -1,5 +1,5 @@
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 import Anthropic from '@anthropic-ai/sdk';
 import {
@@ -37,6 +37,7 @@ const SKILL_MAX_TOKENS = 1500;
 const SKILL1_MAX_ITERATIONS = 4;
 const MCP_BETA = 'mcp-client-2025-11-20';
 const ATLASSIAN_MCP_SERVER_NAME = 'atlassian';
+const DOC_STREAM_TIMEOUT_MS = 120_000;
 const SKILL4_MCP_TIMEOUT_MS = 45_000;
 
 const CACHED_SYSTEM_BLOCK = {
@@ -501,7 +502,8 @@ async function runSkill(client, skill, form, send, { skipLifecycle = false } = {
 
 async function streamDoc(client, docType, form, ragContext, skillOutputs, send) {
   const { builder, system } = DOC_BUILDERS[docType];
-  try {
+
+  const run = async () => {
     const stream = client.messages.stream({
       model: MODEL,
       max_tokens: MAX_TOKENS,
@@ -530,6 +532,17 @@ async function streamDoc(client, docType, form, ragContext, skillOutputs, send) 
     }
 
     send({ type: `${docType}_complete`, stop_reason: final.stop_reason });
+  };
+
+  const timeout = new Promise((_, reject) => {
+    setTimeout(
+      () => reject(new Error(`${docType} generation timed out after ${DOC_STREAM_TIMEOUT_MS / 1000}s`)),
+      DOC_STREAM_TIMEOUT_MS
+    );
+  });
+
+  try {
+    await Promise.race([run(), timeout]);
   } catch (err) {
     const message =
       err instanceof Anthropic.APIError
@@ -570,13 +583,14 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
     skillResults.filter((r) => r.output).map((r) => [r.id, r.output])
   );
 
-  // Skill 6: parallel doc generations seeded with the skill outputs.
+  // Skill 6: compile docs one at a time so each finishes reliably within the
+  // Vercel function limit and streams visible progress to the client.
   send({ type: 'skill_start', skillId: REVIEW_SKILL_ID });
-  await Promise.allSettled(
-    docTypes.map((docType) =>
-      streamDoc(client, docType, form, ragContext, skillOutputs, send)
-    )
-  );
+  for (const docType of docTypes) {
+    send({ type: 'doc_compile_start', docType });
+    await streamDoc(client, docType, form, ragContext, skillOutputs, send);
+    send({ type: 'doc_compile_complete', docType });
+  }
   send({ type: 'skill_complete', skillId: REVIEW_SKILL_ID });
 }
 

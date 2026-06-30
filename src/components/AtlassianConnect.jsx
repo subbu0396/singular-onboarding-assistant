@@ -16,7 +16,6 @@ const ERROR_MESSAGES = {
 export default function AtlassianConnect() {
   const [status, setStatus] = useState({ loading: true, connected: false });
   const [authError, setAuthError] = useState(null);
-  const [authSuccess, setAuthSuccess] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -41,7 +40,6 @@ export default function AtlassianConnect() {
     const errorCode = params.get('atl_error');
 
     if (errorCode) setAuthError(errorCode);
-    if (justConnected) setAuthSuccess(true);
 
     if (params.has('atl_connected') || params.has('atl_error')) {
       params.delete('atl_connected');
@@ -68,7 +66,6 @@ export default function AtlassianConnect() {
 
   const handleConnect = () => {
     setAuthError(null);
-    setAuthSuccess(false);
     window.location.href = '/api/auth/atlassian/login';
   };
 
@@ -81,7 +78,6 @@ export default function AtlassianConnect() {
     } catch {
       // ignore — refresh will re-read status
     }
-    setAuthSuccess(false);
     refresh();
   };
 
@@ -96,23 +92,18 @@ export default function AtlassianConnect() {
       status.siteUrl ||
       'Atlassian';
     return (
-      <div className="flex flex-col items-end gap-1">
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-700 bg-sky-500/10 px-2.5 py-1 text-sky-300">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400" />
-            Atlassian: {identityName}
-          </span>
-          <button
-            type="button"
-            onClick={handleDisconnect}
-            className="rounded px-2 py-1 text-slate-500 hover:text-slate-300"
-          >
-            Disconnect
-          </button>
-        </div>
-        {authSuccess && (
-          <span className="text-[10px] text-emerald-400">Connected successfully.</span>
-        )}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-700 bg-sky-500/10 px-2.5 py-1 text-sky-300">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-sky-400" />
+          Atlassian: {identityName}
+        </span>
+        <button
+          type="button"
+          onClick={handleDisconnect}
+          className="rounded px-2 py-1 text-slate-500 hover:text-slate-300"
+        >
+          Disconnect
+        </button>
       </div>
     );
   }

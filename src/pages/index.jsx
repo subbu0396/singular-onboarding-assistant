@@ -130,13 +130,17 @@ export default function Home() {
       return true;
     }
     if (event.type === 'tool_call_start') {
-      setToolCalls((prev) => ({
-        ...prev,
-        [event.skillId]: [
-          ...(prev[event.skillId] || []),
-          { toolName: event.toolName, status: 'running', ok: null },
-        ],
-      }));
+      setToolCalls((prev) => {
+        const existing = prev[event.skillId] || [];
+        const withoutDup = existing.filter((c) => c.toolName !== event.toolName);
+        return {
+          ...prev,
+          [event.skillId]: [
+            ...withoutDup,
+            { toolName: event.toolName, status: 'running', ok: null },
+          ],
+        };
+      });
       return true;
     }
     if (event.type === 'tool_call_complete') {
@@ -212,18 +216,31 @@ export default function Home() {
             return;
           }
           if (handleDocEvent(event)) return;
+          if (event.type === 'doc_compile_start') {
+            const labels = {
+              runbook: 'Integration Runbook',
+              faq: 'FAQ Document',
+              checklist: 'Test Checklist',
+            };
+            setLoadingStep(`Writing ${labels[event.docType] || event.docType}...`);
+            return;
+          }
           if (event.type === 'done') {
             setLoadingStep('');
+            setLoadingDocs(NONE_LOADING);
           } else if (event.type === 'error') {
             setError(event.message || 'Generation failed');
+            setLoadingDocs(NONE_LOADING);
           }
         });
       } catch (err) {
         setError(err.message || 'Something went wrong. Please try again.');
         setLoadingDocs(NONE_LOADING);
       } finally {
+        flushDeltas();
         setIsLoading(false);
         setLoadingStep('');
+        setLoadingDocs(NONE_LOADING);
       }
     },
     [handleDocEvent, handleSkillEvent]
