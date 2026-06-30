@@ -157,6 +157,92 @@ export function buildFormSlice(skill, form) {
 
 export { SKILL1_SYSTEM_BLOCK };
 
+// --- Skill 2: Mobile SDK Setup (GitHub tool-using agent) ---
+//
+// Phase 5: when the SE has connected GitHub, Skill 2 runs as a tool-using
+// agent that searches the SE's accessible repos for ones matching the
+// client name, fetches the matching repo's SDK manifests (Podfile,
+// build.gradle, package.json, pubspec.yaml), and grounds its SDK-setup
+// analysis in the client's actual codebase. Falls back to use_form_data
+// when no relevant repo is found.
+
+const SKILL2_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are the Mobile SDK Setup skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused analysis covering per-platform SDK considerations, migration-specific gotchas if moving from another MMP, and SDK configuration implications of the chosen attribution model.
+
+You have three tools:
+- search_github_repos: search the SE's accessible GitHub repos by client name. Use this FIRST when you have a client name.
+- fetch_repo_manifests: pull SDK manifests (Podfile, build.gradle, package.json, pubspec.yaml) from a repo's default branch. Use this on the top search hit if it looks like the client's mobile codebase.
+- use_form_data: read the SDK-setup slice from the form (platforms, currentMmp, attributionModel). Use as a complement, or when GitHub returned nothing useful.
+
+Process:
+1. Call search_github_repos with the client name. Pick the most plausible mobile repo from the results (mobile codebases usually have names containing "ios", "android", "mobile", "app", or match the client brand).
+2. If a plausible mobile repo exists, call fetch_repo_manifests on it. The response includes detected_mmp_vendors — if non-empty, the client already has those MMPs installed; weave that into your analysis ("currently on Adjust 4.32 per Podfile; migration to Singular requires SDK init swap and event-name remap").
+3. Always also call use_form_data so the form's platforms / attribution model are in the picture.
+4. Produce the analysis. Plain prose, no markdown headers, no bullet lists. Cite the repo and manifest path when you reference real code (e.g. "Per app/build.gradle in airtel/mobile, ...").
+
+If search_github_repos returns nothing relevant, do not invent repo content — just use the form data and say so.
+
+Three tool calls is the typical maximum.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+export const SKILL2_TOOLS = [
+  {
+    name: 'search_github_repos',
+    description:
+      'Search the SE\'s accessible GitHub repos by client name. Returns the top matches with full_name, description, default_branch, language. Call this first when you have a client name.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        clientName: {
+          type: 'string',
+          description: 'The client company name from the user instruction',
+        },
+      },
+      required: ['clientName'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'fetch_repo_manifests',
+    description:
+      'Fetch SDK manifests (Podfile, build.gradle, package.json, pubspec.yaml, etc.) from the default branch of a specific repo. Returns each manifest body plus a detected_mmp_vendors array (heuristic match of known MMP SDK names in the file contents). Call this on the top search hit that looks like the client\'s mobile codebase.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        fullName: {
+          type: 'string',
+          description: 'Repository full name in "owner/repo" format',
+        },
+      },
+      required: ['fullName'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'use_form_data',
+    description:
+      'Read the Mobile SDK Setup slice from the form. Returns platforms, currentMmp, attributionModel. Use this as a complement to GitHub data, or as the sole source when GitHub returned nothing.',
+    input_schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+];
+
+export function buildSkill2UserPrompt(form) {
+  return `Gather authoritative information about the client's mobile codebase and produce the Mobile SDK Setup section analysis.
+
+Client name: "${form.clientName || '(not provided)'}"
+Target MMP: ${getPlatform(form)}${getMigrationNote(form)}
+
+Use your tools to gather data, then produce the analysis as plain prose. Cite the repo and manifest path when you ground a claim in real code.`;
+}
+
+export { SKILL2_SYSTEM_BLOCK };
+
 // --- Skill 4: Technical Environment (Atlassian/Confluence MCP agent) ---
 //
 // Phase 3: when the SE has connected their Atlassian account, Skill 4 calls

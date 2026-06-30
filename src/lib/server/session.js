@@ -19,6 +19,8 @@ const GOOGLE_SESSION_COOKIE = 'google_session';
 const GOOGLE_STATE_COOKIE = 'google_oauth_state';
 const MS_SESSION_COOKIE = 'ms_session';
 const MS_STATE_COOKIE = 'ms_oauth_state';
+const GITHUB_SESSION_COOKIE = 'github_session';
+const GITHUB_STATE_COOKIE = 'github_oauth_state';
 const ATL_SESSION_COUNT_COOKIE = 'atl_session_c';
 const ATL_SESSION_CHUNK_PREFIX = 'atl_session_';
 // Browsers reject cookies whose name+value+attrs exceed ~4096 bytes.
@@ -401,6 +403,40 @@ export async function readMicrosoftStateCookie(req) {
 
 export function buildClearMicrosoftStateCookie() {
   return buildClearCookieFor(MS_STATE_COOKIE);
+}
+
+// --- GitHub session (Phase 5 — Skill 2 SDK setup grounding) ---
+//
+// Payload shape: { access_token, refresh_token?, expires_at?, scope,
+//                  identity?: { login, name, avatar_url } }
+// Classic OAuth-app tokens don't expire and have no refresh token; the
+// newer GitHub Apps user-to-server tokens are short-lived with refresh.
+// We handle both — expires_at and refresh_token are optional in the
+// session payload and only used when present.
+
+export function readGitHubSession(req) {
+  return readCookieJwt(req, GITHUB_SESSION_COOKIE);
+}
+
+export function buildGitHubSessionCookie(payload) {
+  return buildSessionCookieFor(GITHUB_SESSION_COOKIE, payload);
+}
+
+export function buildClearGitHubSessionCookie() {
+  return buildClearCookieFor(GITHUB_SESSION_COOKIE);
+}
+
+export function buildGitHubStateCookie(state) {
+  return buildStateCookieFor(GITHUB_STATE_COOKIE, state);
+}
+
+export async function readGitHubStateCookie(req) {
+  const payload = await readCookieJwt(req, GITHUB_STATE_COOKIE);
+  return payload?.state || null;
+}
+
+export function buildClearGitHubStateCookie() {
+  return buildClearCookieFor(GITHUB_STATE_COOKIE);
 }
 
 export function generateRandomState() {

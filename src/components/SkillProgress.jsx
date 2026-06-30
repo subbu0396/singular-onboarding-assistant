@@ -38,6 +38,8 @@ const TOOL_LABELS = {
   google_calendar: 'Google Calendar',
   microsoft_graph: 'Outlook Calendar',
   calendar: 'Calendar',
+  search_github_repos: 'GitHub: search',
+  fetch_repo_manifests: 'GitHub: manifests',
 };
 
 // Atlassian MCP tool names are namespaced (e.g. "atlassian.searchConfluence");

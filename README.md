@@ -156,6 +156,21 @@ If you want Skill 5's Go-Live Timeline analysis to factor in real engineering av
    ```
 5. The "Connect Google Calendar" button in the header walks the SE through OAuth. After connecting, Skill 5 queries `freeBusy.query` for both the engineering calendar and the SE's primary calendar across a ±2-week window around `targetGoLiveDate`, then grounds its timeline analysis in the actual busy-minute counts ("Engineering has 2,340 busy minutes in the 14 days before the target — limited bandwidth for SDK escalations"). If no calendar is connected or the fetch fails, Skill 5 falls back to the static prompt.
 
+### GitHub (optional, Phase 5)
+
+If you want Skill 2's Mobile SDK Setup analysis to ground itself in the client's actual codebase (current MMP install, build config, min OS versions) instead of generic platform defaults:
+
+1. Create an OAuth app at [github.com/settings/developers](https://github.com/settings/developers) → **OAuth Apps** → **New OAuth App**:
+   - Authorization callback URL: `http://localhost:3000/api/auth/github/callback` + every Vercel alias you deploy to
+2. Copy the client ID + secret into `.env.local`:
+   ```env
+   GITHUB_CLIENT_ID=...
+   GITHUB_CLIENT_SECRET=...
+   # Optional — broaden to `repo` if the client's mobile repos are private
+   # GITHUB_OAUTH_SCOPES="read:user repo"
+   ```
+3. The "Connect GitHub" button in the header walks the SE through OAuth. After connecting, Skill 2 runs as a tool-using agent: `search_github_repos` against the client name, `fetch_repo_manifests` on the top match (Podfile / build.gradle / package.json / pubspec.yaml), then synthesizes the SDK-setup analysis citing real manifest paths and surfacing any already-installed MMP vendor (heuristic match for Singular, AppsFlyer, Adjust, Branch, etc.).
+
 ### Seeding the RAG knowledge base (optional)
 
 The RAG layer is a no-op if the Supabase + Voyage env vars aren't set — generations just don't get the pattern injection. To populate it:
@@ -200,12 +215,13 @@ src/
 
 ## Status & roadmap
 
-**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), and Phase 4 (Google Calendar for Skill 5) are live in production. Microsoft Graph / Outlook Calendar will follow as a Phase 4 extension.
+**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), Phase 4 (Google Calendar for Skill 5), and Phase 5 (GitHub for Skill 2) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
 
 **Potential next steps** (not currently scheduled):
+- Phase 6 — doc lifecycle: persist generated packages in Supabase, list past generations, shareable read-only links
 - Phase 4 extension — Microsoft Graph (Outlook Calendar) as a second provider for Skill 5
+- Skill 3 — Slack integration for kickoff coordination (the only remaining static analyst skill)
 - A "Salesforce Picker" UI for fuzzy account name search instead of strict equality
-- Custom-field support in the Salesforce lookup (Platforms__c, Current_MMP__c, etc.)
 - Output observability — surface `usage.cache_read_input_tokens` to verify prompt caching is firing
 
 ## License
