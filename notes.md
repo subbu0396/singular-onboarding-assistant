@@ -1,6 +1,6 @@
 # MMP Onboarding Assistant — Build Notes
 
-Personal progress log of what's been built, why, what broke along the way, and what's queued. Paste into Notion or read on GitHub. Reflects state through PR #29.
+Personal progress log of what's been built, why, what broke along the way, and what's queued. Paste into Notion or read on GitHub. Reflects state through PR #33.
 
 **Live demo:** [singular-onboarding-assistant.vercel.app](https://singular-onboarding-assistant.vercel.app/)
 **Repo:** [subbu0396/singular-onboarding-assistant](https://github.com/subbu0396/singular-onboarding-assistant)
@@ -24,6 +24,7 @@ A six-skill Claude agent pipeline that takes a 5-section onboarding form and emi
 | 5 | Skill 2 — Mobile SDK Setup | GitHub repo search + manifest fetch | Live |
 | 6 | Companion service on Render | Attempted MCP-heavy skills off Vercel — retired | Artifact |
 | 7 | Doc lifecycle | Supabase save + list + 24h share | Live |
+| 8 | Intake alternatives | Salesforce autofill + conversational chat sidebar | Live |
 | — | Skill 3 — Integration Type | Still a static prompt | Open |
 
 ---
@@ -167,6 +168,36 @@ Persist every completed generation to Supabase and give the SE a way to revisit 
 
 ---
 
+## Phase 8 — Intake alternatives (skip the form)
+
+Filling the 5-section form takes 3–5 minutes. Phase 8 adds two AI-driven ways to skip most of it. Both paths converge on the same shared tool schema so the 6-skill pipeline is untouched.
+
+**Shared contract.** `src/lib/server/intakeTool.js` defines `capture_client_intake` — a single Claude tool whose input schema mirrors `INITIAL_FORM_STATE` field-for-field (enums matching `TARGET_MMP_PLATFORMS`, `INDUSTRIES`, etc.). Includes `missingFields` and `confidenceNotes` so the UI knows what the model couldn't populate. `mergeIntakeIntoForm()` drops nulls / empty arrays so unset fields keep their defaults rather than becoming literal `null` and breaking form inputs.
+
+**Entry point B — Salesforce autofill** (PR #31).
+- `POST /api/intake/salesforce` — pulls the SF Account (real session preferred, mock fallback), passes as plain-text context to Claude with `tool_choice: { type: 'tool', name: 'capture_client_intake' }` (single-turn, forced).
+- Refreshed SF tokens propagate back to the cookie via `Set-Cookie` on the response.
+- `SalesforceAutofill.jsx` component sits under the Client Name field in the Client Info section. Enabled once the name is 3+ chars.
+- Result feeds `handleAutofill` in `Form.jsx`, which merges onto state and surfaces an indigo banner listing missing fields.
+
+**Entry point A — Conversational intake** (PR #32).
+- `POST /api/intake/converse` — chat endpoint with the intake tool available but NOT forced. Claude asks 1–3 targeted follow-ups, then fires the tool when it has enough. Response type flips from `assistant` (keep chatting) to `intake_ready` (form is filled).
+- System prompt caps the conversation: one question per turn, prioritize `clientName` / `targetMmp` / `targetGoLiveDate`, call the tool immediately when the SE volunteers a lot upfront.
+- `IntakeChat.jsx` component drives the conversation. On `intake_ready` it hands the filled form back and closes.
+- `Form.jsx` gained an `initialForm` prop so the chat handoff seeds `useState` without lifting state up to the page. `formKey` bumps force a remount on new intake.
+
+**Sidebar UX** (PR #33).
+- Chat opens in a right-side sliding sidebar instead of replacing the form. Form stays visible behind a dimmed backdrop so the SE keeps their bearings.
+- Backdrop click, X button, and Escape all close. Body scroll is locked while open.
+- Conversation resets on close so re-opening starts fresh.
+
+**Design choices worth noting:**
+- Both entry points funnel into the *same* review-mode form. The SE always has the last word — no auto-generate from intake.
+- Shipped B before A because B reuses existing SF OAuth (no new auth surface) and is a single-turn extract with no conversation state — a cleaner contract validation.
+- The intake tool is defined once and imported by both routes, so schema drift is impossible.
+
+---
+
 ## Recent quality passes (post-Phase-7)
 
 - **Skill 4 → real tool-using agent** (PR #27). Replaces the earlier deterministic server-side query derivation with a Claude tool loop. One badge per query, one per page fetch — instead of a single "search" / "page" badge in a burst at the end.
@@ -224,6 +255,10 @@ The Render service's `MCP_SERVICE_URL` / `MCP_SERVICE_SECRET` are no longer read
 | [#27](https://github.com/subbu0396/singular-onboarding-assistant/pull/27) | Skill 4 tool loop; 3-tier badges; client-stack framing | Real tool-using agent, `count` field, green/amber/grey |
 | [#28](https://github.com/subbu0396/singular-onboarding-assistant/pull/28) | GitHub badges get query + link treatment; re-land Confluence URL work | Badge labels carry query/repo; every badge with URL is a link |
 | [#29](https://github.com/subbu0396/singular-onboarding-assistant/pull/29) | Stop raw code fragments leaking to the top of generated docs | Fenced-code prompt tightening + defensive `sanitizeMarkdown` |
+| [#30](https://github.com/subbu0396/singular-onboarding-assistant/pull/30) | Update notes.md — build log through PR #29 | Documentation refresh |
+| [#31](https://github.com/subbu0396/singular-onboarding-assistant/pull/31) | Phase 8: Salesforce autofill for onboarding intake | Shared `capture_client_intake` tool + `/api/intake/salesforce` route + autofill UI |
+| [#32](https://github.com/subbu0396/singular-onboarding-assistant/pull/32) | Conversational intake — describe the client instead of typing | `/api/intake/converse` chat endpoint + `IntakeChat` component + Form `initialForm` prop |
+| [#33](https://github.com/subbu0396/singular-onboarding-assistant/pull/33) | Open intake chat as a sidebar over the form | Right-side sliding panel, backdrop / X / Escape to close, conversation resets on close |
 
 Earlier PRs (before this notes file was started) covered Phase 1 and Phase 2.
 
@@ -234,11 +269,12 @@ Earlier PRs (before this notes file was started) covered Phase 1 and Phase 2.
 Listed roughly by impact-per-effort:
 
 1. **SE authentication + multi-tenancy.** Ranked as the highest-impact next step. Every OAuth cookie becomes user-scoped, generations list filters by SE identity, share links get proper owner semantics. Needs a login flow (magic-link or Google sign-in) + Supabase schema changes.
-2. **Prompt-caching observability.** Read `usage.cache_read_input_tokens` off the Claude responses and surface it in the pipeline row as a "cache hit N%" indicator per skill.
-3. **Doc versioning / regeneration diffs.** Regenerate creates a new `generations` row instead of replacing. Add a version selector + side-by-side diff.
-4. **Salesforce fuzzy picker + custom fields.** Typeahead over SF accounts (fuzzy match instead of strict equality) plus custom-field support (`Platforms__c`, `Current_MMP__c`) feeding into Skill 1.
-5. **Microsoft Graph (Outlook)** as a second calendar provider for Skill 5.
-6. **Skill 3 grounding.** The last remaining static analyst skill. Slack-for-kickoff-coordination is one candidate; a CDP config source is another.
+2. **Streaming for the intake chat.** Currently non-streamed JSON per turn — each turn is <5s so it's fine, but SSE token deltas would feel snappier. Reuse the pattern from `/api/generate`.
+3. **Prompt-caching observability.** Read `usage.cache_read_input_tokens` off the Claude responses and surface it in the pipeline row as a "cache hit N%" indicator per skill.
+4. **Doc versioning / regeneration diffs.** Regenerate creates a new `generations` row instead of replacing. Add a version selector + side-by-side diff.
+5. **Salesforce fuzzy picker + custom fields.** Typeahead over SF accounts (fuzzy match instead of strict equality) plus custom-field support (`Platforms__c`, `Current_MMP__c`) feeding into both Skill 1 and Phase 8's autofill.
+6. **Microsoft Graph (Outlook)** as a second calendar provider for Skill 5.
+7. **Skill 3 grounding.** The last remaining static analyst skill. Slack-for-kickoff-coordination is one candidate; a CDP config source is another.
 
 ---
 
