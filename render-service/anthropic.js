@@ -16,7 +16,7 @@ export async function callWithMcp({
   mcpServerName,
   mcpServerUrl,
   authorizationToken,
-  timeoutMs = 3 * 60 * 1000,
+  timeoutMs = 5 * 60 * 1000,
 }) {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY is not configured');

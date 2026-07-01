@@ -16,7 +16,12 @@
 // to their existing REST paths — same graceful-fallback pattern as
 // before, just relocated.
 
-const DEFAULT_TIMEOUT_MS = 4 * 60 * 1000;
+// Route's maxDuration is 300s, so the outer AbortController can't exceed
+// that. Keep a small headroom so if Render's own 5-min Anthropic timeout
+// fires the 502 lands cleanly here before the route itself dies. This
+// leaves ~30s for the Skill 6 doc streaming that runs after all analyst
+// skills complete — tight but usable.
+const DEFAULT_TIMEOUT_MS = 270 * 1000;
 
 export function isRenderMcpConfigured() {
   return Boolean(
