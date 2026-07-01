@@ -3,6 +3,7 @@ import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
 import IntegrationsMenu from '@/components/IntegrationsMenu';
 import RecentGenerations from '@/components/RecentGenerations';
+import IntakeChat from '@/components/IntakeChat';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -78,6 +79,12 @@ async function consumeSSE(res, onEvent) {
 
 export default function Home() {
   const [view, setView] = useState('form');
+  const [intakeMode, setIntakeMode] = useState('form');
+  const [intakePrefill, setIntakePrefill] = useState(null);
+  const [intakeMeta, setIntakeMeta] = useState(null);
+  // Bumped when a chat completes so the Form remounts and re-seeds its
+  // internal state from the new initialForm prop.
+  const [formKey, setFormKey] = useState(0);
   const [formData, setFormData] = useState(null);
   const [documents, setDocuments] = useState(EMPTY_DOCS);
   const [errors, setErrors] = useState(EMPTY_ERRORS);
@@ -416,22 +423,50 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
-        {view === 'form' && (
+        {view === 'form' && intakeMode === 'chat' && (
+          <IntakeChat
+            onComplete={(filledForm, meta) => {
+              setIntakePrefill(filledForm);
+              setIntakeMeta({
+                missingFields: meta?.missingFields || [],
+                source: meta?.source || 'chat',
+              });
+              setFormKey((k) => k + 1);
+              setIntakeMode('form');
+            }}
+            onCancel={() => setIntakeMode('form')}
+          />
+        )}
+
+        {view === 'form' && intakeMode === 'form' && (
           <>
-            <div className="mb-8 text-center">
-              <h2 className="text-2xl font-bold text-white sm:text-3xl">
-                Client Tech Stack Input
-              </h2>
-              <p className="mt-2 text-sm text-slate-400">
-                Enter the client&apos;s integration details and select your MMP platform to generate tailored onboarding documents.
-              </p>
+            <div className="mb-6 flex flex-col items-center gap-3 text-center">
+              <div>
+                <h2 className="text-2xl font-bold text-white sm:text-3xl">
+                  Client Tech Stack Input
+                </h2>
+                <p className="mt-2 text-sm text-slate-400">
+                  Enter the client&apos;s integration details and select your MMP platform to generate tailored onboarding documents.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIntakeMode('chat')}
+                disabled={isLoading}
+                className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Prefer to describe the client instead? Chat with the intake copilot →
+              </button>
             </div>
             <Form
+              key={formKey}
               onSubmit={generateAll}
               isLoading={isLoading}
               loadingStep={loadingStep}
               error={error}
               onClearError={() => setError(null)}
+              initialForm={intakePrefill}
+              initialAutofillMeta={intakeMeta}
             />
             <RecentGenerations onOpen={openPastGeneration} />
           </>
