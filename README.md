@@ -170,21 +170,14 @@ If you want Skill 2's Mobile SDK Setup analysis to ground itself in the client's
    ```
 3. The "Connect GitHub" button in the header walks the SE through OAuth. After connecting, Skill 2 runs as a tool-using agent: `search_github_repos` against the client name, `fetch_repo_manifests` on the top match (Podfile / build.gradle / package.json / pubspec.yaml), then synthesizes the SDK-setup analysis citing real manifest paths and surfacing any already-installed MMP vendor (heuristic match for Singular, AppsFlyer, Adjust, Branch, etc.).
 
-### MCP-heavy skills on Render (optional, Phase 6)
+### About the MCP experiments (Phase 3 & Phase 6)
 
-Vercel's serverless timeout budget wasn't long enough for Anthropic's MCP connector to complete against vendor MCP servers (Phase 3 hit >50s and never got a response). The workaround is a small companion service running on Render (or any long-lived process host) that holds those calls open as long as they need.
+Two rounds of work tried to ground Skill 4 through Anthropic's `mcp_servers` connector — first inline on Vercel Edge (Phase 3), then via a companion Node service on Render to escape Vercel's serverless timeout (Phase 6). Both times the same wall: vendor MCP servers aren't fast enough or open enough for a real-time onboarding pipeline.
 
-- Companion code lives in [`render-service/`](render-service/) — Express app with two routes (`/health`, `/skill4/mcp`).
-- Skill 4 uses [Atlassian Rovo MCP](https://mcp.atlassian.com/v1/mcp/authv2) with the SE's Atlassian OAuth token.
-- Skill 2 was originally scoped for MCP too, against [GitHub's hosted MCP server](https://api.githubcopilot.com/mcp/), but that server rejects our classic OAuth-app tokens (it wants Copilot-issued ones). Skill 2 stays on the Vercel-side REST tool-agent from Phase 5 — same grounding in real GitHub codebases, just not via MCP.
-- Vercel's `/api/generate` proxies to the Render service when `MCP_SERVICE_URL` + `MCP_SERVICE_SECRET` are set. When they're not, both skills quietly fall back to the Vercel REST paths — so the site works whether or not Render is up.
+- **Atlassian Rovo MCP** (`mcp.atlassian.com/v1/mcp/authv2`) — response time is unbounded in practice. We measured >5 min against a request that Confluence REST completes in ~10s.
+- **GitHub Copilot MCP** (`api.githubcopilot.com/mcp/`) — rejects our classic OAuth-app tokens; it expects Copilot-issued ones.
 
-Deploy steps live in [`render-service/README.md`](render-service/README.md). Two env vars need to match on both sides:
-
-```env
-MCP_SERVICE_URL=https://your-render-app.onrender.com
-MCP_SERVICE_SECRET=any_long_random_string  # same value on Render
-```
+Skill 2 and Skill 4 both use direct REST today (`runSkill2GitHubAgent` and `runSkill4ConfluenceAgent` in [`src/app/api/generate/route.js`](src/app/api/generate/route.js)). The [`render-service/`](render-service/) directory stays in the repo as an honest artifact of the Phase 6 experiment — if either vendor speeds up or exposes a simpler token flow, wiring it back in is a small change.
 
 ### Doc lifecycle: save, list, share (Phase 7)
 
@@ -239,7 +232,7 @@ src/
 
 ## Status & roadmap
 
-**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), Phase 4 (Google Calendar for Skill 5), Phase 5 (GitHub for Skill 2), Phase 6 (Render-hosted MCP service), and Phase 7 (doc lifecycle: save / list / share) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
+**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4 — REST after MCP pivot), Phase 4 (Google Calendar for Skill 5), Phase 5 (GitHub for Skill 2), Phase 6 (Render-hosted MCP experiment — code retained; see notes above), and Phase 7 (doc lifecycle: save / list / share) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
 
 **Potential next steps** (not currently scheduled):
 - Phase 4 extension — Microsoft Graph (Outlook Calendar) as a second provider for Skill 5
