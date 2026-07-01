@@ -68,17 +68,39 @@ function StateIndicator({ state, index }) {
   return <span className="text-[10px] text-slate-600">{index + 1}</span>;
 }
 
-// Compact preview of the tool's input, used as the badge tooltip so the SE
-// can hover to see what Claude actually searched for or which page it
-// opened. Handles the two shapes we emit today; unknown keys fall back to
-// a JSON stringify so a new tool never leaves an empty tooltip.
+function truncate(s, max = 28) {
+  const str = String(s || '');
+  return str.length > max ? `${str.slice(0, max - 2)}…` : str;
+}
+
+// Bring the specific query / repo / page into the badge label itself so a
+// row of "Confluence: search" chips doesn't look like duplicates when Claude
+// runs three different queries. Kept short so the pill doesn't wrap.
+function detailForCall(call) {
+  const input = call?.input || {};
+  if (call.toolName === 'search_confluence' && input.query) {
+    return truncate(input.query);
+  }
+  if (call.toolName === 'get_confluence_page' && (input.title || input.pageId)) {
+    return truncate(input.title || input.pageId);
+  }
+  if (call.toolName === 'search_github_repos' && input.clientName) {
+    return truncate(input.clientName);
+  }
+  if (call.toolName === 'fetch_repo_manifests' && input.fullName) {
+    return truncate(input.fullName, 32);
+  }
+  return null;
+}
+
+// Compact preview of the tool's input for the badge's tooltip.
 function summarizeInput(toolName, input) {
   if (!input || typeof input !== 'object') return null;
   if (input.query) return `query: "${input.query}"`;
-  if (input.title) return `page: ${input.title}`;
+  if (input.title) return `page: ${truncate(input.title, 60)}`;
   if (input.pageId) return `pageId: ${input.pageId}`;
-  if (input.clientName) return `client: ${input.clientName}`;
   if (input.fullName) return `repo: ${input.fullName}`;
+  if (input.clientName) return `client: ${input.clientName}`;
   if (input.window?.start && input.window?.end) {
     return `window: ${input.window.start.slice(0, 10)} → ${input.window.end.slice(0, 10)}`;
   }
@@ -96,7 +118,9 @@ function summarizeInput(toolName, input) {
 //   ok+empty  → amber ("call worked but returned nothing on-point")
 //   failed   → grey with error message in tooltip
 function ToolBadge({ call }) {
-  const label = labelForTool(call.toolName);
+  const baseLabel = labelForTool(call.toolName);
+  const detail = detailForCall(call);
+  const label = detail ? `${baseLabel}: ${detail}` : baseLabel;
   const inputSummary = summarizeInput(call.toolName, call.input);
   const runningTooltip = inputSummary || label;
 
@@ -114,8 +138,6 @@ function ToolBadge({ call }) {
 
   const ok = call.ok !== false;
   const hasCount = typeof call.count === 'number';
-  // Retrieval-shaped tools (use_form_data, get_confluence_page) don't have
-  // a meaningful "hit count" concept, so absent count is treated as OK.
   const empty = ok && hasCount && call.count === 0;
 
   const tone = !ok
@@ -125,21 +147,43 @@ function ToolBadge({ call }) {
       : 'bg-emerald-900/40 text-emerald-300';
   const icon = !ok ? '·' : empty ? '⚠' : '✓';
   const countSuffix = ok && hasCount && call.count > 0 ? ` · ${call.count}` : '';
+  // Server attaches input.url on completion for search / page / repo
+  // tools so the badge is a real link to that specific artefact.
+  const url = ok ? call.input?.url : null;
 
   const tooltipParts = [];
   if (inputSummary) tooltipParts.push(inputSummary);
   if (!ok && call.message) tooltipParts.push(`error: ${call.message}`);
   else if (empty) tooltipParts.push('call succeeded but returned no results');
   else if (ok && hasCount) tooltipParts.push(`${call.count} result${call.count === 1 ? '' : 's'}`);
+  if (url) tooltipParts.push('click to open');
   const tooltip = tooltipParts.length ? tooltipParts.join(' — ') : label;
 
-  return (
-    <span
-      title={tooltip}
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${tone}`}
-    >
+  const inner = (
+    <>
       {icon} {label}
       {countSuffix}
+      {url && <span className="ml-0.5 opacity-70">↗</span>}
+    </>
+  );
+  const className = `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${tone}${url ? ' underline-offset-2 hover:underline hover:brightness-125' : ''}`;
+
+  if (url) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={tooltip}
+        className={className}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <span title={tooltip} className={className}>
+      {inner}
     </span>
   );
 }

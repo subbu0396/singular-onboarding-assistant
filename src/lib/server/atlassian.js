@@ -198,6 +198,31 @@ export async function resolveCloudId(session) {
   return resources?.[0]?.id || null;
 }
 
+// The site URL isn't in the JWE cookie any more (Phase 3 trimmed it to
+// keep the cookie under the 4KB browser limit), so we re-derive it from
+// accessible-resources when we need to build a clickable Confluence URL.
+// Callers cache this per Skill 4 run.
+export async function resolveSite(session) {
+  const resources = await fetchAccessibleResources(session.access_token);
+  const primary = resources?.[0] || null;
+  if (!primary) return { cloudId: null, siteUrl: null };
+  return {
+    cloudId: session?.cloud_id || primary.id || null,
+    siteUrl: primary.url || null,
+  };
+}
+
+function buildPageWebUrl(siteUrl, webui) {
+  if (!siteUrl || !webui) return null;
+  const path = webui.startsWith('/') ? webui : `/${webui}`;
+  return `${siteUrl.replace(/\/$/, '')}/wiki${path}`;
+}
+
+export function buildConfluenceSearchUrl(siteUrl, query) {
+  if (!siteUrl || !query) return null;
+  return `${siteUrl.replace(/\/$/, '')}/wiki/search?text=${encodeURIComponent(query)}`;
+}
+
 /** Derive 1-3 Confluence search queries from the form's tech-environment slice. */
 export function deriveConfluenceQueries(form) {
   const queries = [];
@@ -221,7 +246,7 @@ export function deriveConfluenceQueries(form) {
   return unique.slice(0, 3);
 }
 
-export async function searchConfluence(session, cloudId, query, limit = 3) {
+export async function searchConfluence(session, cloudId, query, limit = 3, siteUrl = null) {
   const cql = `text ~ "${query.replace(/"/g, '\\"')}" AND type=page`;
   const url = `${confluenceApiBase(cloudId)}/search?cql=${encodeURIComponent(cql)}&limit=${limit}`;
 
@@ -238,14 +263,18 @@ export async function searchConfluence(session, cloudId, query, limit = 3) {
   }
 
   const data = await res.json();
-  return (data.results || []).map((hit) => ({
-    id: hit.content?.id || hit.id,
-    title: hit.content?.title || hit.title || 'Untitled',
-    excerpt: stripHtml(hit.excerpt || hit.content?.excerpt || ''),
-  }));
+  return (data.results || []).map((hit) => {
+    const webui = hit.content?._links?.webui || hit._links?.webui || null;
+    return {
+      id: hit.content?.id || hit.id,
+      title: hit.content?.title || hit.title || 'Untitled',
+      excerpt: stripHtml(hit.excerpt || hit.content?.excerpt || ''),
+      url: buildPageWebUrl(siteUrl, webui),
+    };
+  });
 }
 
-export async function fetchConfluencePage(session, cloudId, pageId) {
+export async function fetchConfluencePage(session, cloudId, pageId, siteUrl = null) {
   const url = `${confluenceApiBase(cloudId)}/content/${pageId}?expand=body.storage`;
   const res = await fetch(url, {
     headers: {
@@ -266,6 +295,7 @@ export async function fetchConfluencePage(session, cloudId, pageId) {
     id: page.id,
     title: page.title || 'Untitled',
     excerpt: text.slice(0, 2500),
+    url: buildPageWebUrl(siteUrl, page?._links?.webui),
   };
 }
 
