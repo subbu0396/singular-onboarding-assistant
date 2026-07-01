@@ -57,6 +57,30 @@ function labelForTool(toolName) {
   return toolName;
 }
 
+// Bring the specific query / repo / page into the badge label itself so a
+// row of "Confluence: search" chips doesn't look like duplicates when Claude
+// runs three different queries. Kept short so the pill doesn't wrap.
+function detailForCall(call) {
+  const input = call?.input || {};
+  if (call.toolName === 'search_confluence' && input.query) {
+    const q = String(input.query);
+    return q.length > 28 ? `${q.slice(0, 26)}…` : q;
+  }
+  if (call.toolName === 'get_confluence_page' && (input.title || input.pageId)) {
+    const t = input.title || input.pageId;
+    return String(t).length > 28 ? `${String(t).slice(0, 26)}…` : String(t);
+  }
+  if (call.toolName === 'fetch_repo_manifests' && input.fullName) {
+    return input.fullName;
+  }
+  return null;
+}
+
+function truncateTitle(t) {
+  const s = String(t || '');
+  return s.length > 60 ? `${s.slice(0, 57)}…` : s;
+}
+
 function StateIndicator({ state, index }) {
   if (state === 'complete') return <span>✓</span>;
   if (state === 'error') return <span>✕</span>;
@@ -75,7 +99,7 @@ function StateIndicator({ state, index }) {
 function summarizeInput(toolName, input) {
   if (!input || typeof input !== 'object') return null;
   if (input.query) return `query: "${input.query}"`;
-  if (input.title) return `page: ${input.title}`;
+  if (input.title) return `page: ${truncateTitle(input.title)}`;
   if (input.pageId) return `pageId: ${input.pageId}`;
   if (input.clientName) return `client: ${input.clientName}`;
   if (input.fullName) return `repo: ${input.fullName}`;
@@ -96,7 +120,9 @@ function summarizeInput(toolName, input) {
 //   ok+empty  → amber ("call worked but returned nothing on-point")
 //   failed   → grey with error message in tooltip
 function ToolBadge({ call }) {
-  const label = labelForTool(call.toolName);
+  const baseLabel = labelForTool(call.toolName);
+  const detail = detailForCall(call);
+  const label = detail ? `${baseLabel}: ${detail}` : baseLabel;
   const inputSummary = summarizeInput(call.toolName, call.input);
   const runningTooltip = inputSummary || label;
 
@@ -125,21 +151,43 @@ function ToolBadge({ call }) {
       : 'bg-emerald-900/40 text-emerald-300';
   const icon = !ok ? '·' : empty ? '⚠' : '✓';
   const countSuffix = ok && hasCount && call.count > 0 ? ` · ${call.count}` : '';
+  // Server attaches input.url on completion for search / page tools so the
+  // badge becomes a real link into Confluence for that specific result.
+  const url = ok ? call.input?.url : null;
 
   const tooltipParts = [];
   if (inputSummary) tooltipParts.push(inputSummary);
   if (!ok && call.message) tooltipParts.push(`error: ${call.message}`);
   else if (empty) tooltipParts.push('call succeeded but returned no results');
   else if (ok && hasCount) tooltipParts.push(`${call.count} result${call.count === 1 ? '' : 's'}`);
+  if (url) tooltipParts.push('click to open in Confluence');
   const tooltip = tooltipParts.length ? tooltipParts.join(' — ') : label;
 
-  return (
-    <span
-      title={tooltip}
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${tone}`}
-    >
+  const inner = (
+    <>
       {icon} {label}
       {countSuffix}
+      {url && <span className="ml-0.5 opacity-70">↗</span>}
+    </>
+  );
+  const className = `inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${tone}${url ? ' underline-offset-2 hover:underline hover:brightness-125' : ''}`;
+
+  if (url) {
+    return (
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={tooltip}
+        className={className}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <span title={tooltip} className={className}>
+      {inner}
     </span>
   );
 }

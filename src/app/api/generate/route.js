@@ -25,9 +25,10 @@ import {
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
 import {
   ensureFreshAtlassianSession,
-  resolveCloudId,
+  resolveSite,
   searchConfluence,
   fetchConfluencePage,
+  buildConfluenceSearchUrl,
 } from '@/lib/server/atlassian';
 import {
   readSession,
@@ -322,17 +323,19 @@ async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
   send({ type: 'skill_start', skillId });
 
   const accessToken = atlSession?.access_token;
-  // resolveCloudId hits accessible-resources once; cache the result so
-  // multiple search / fetch tool calls don't re-do it every time.
-  let cachedCloudId = null;
-  const getCloudId = async () => {
-    if (cachedCloudId) return cachedCloudId;
-    cachedCloudId = await resolveCloudId(atlSession);
-    return cachedCloudId;
+  // Resolve {cloudId, siteUrl} once; cached across all tool calls in the
+  // run so we can build clickable Confluence URLs without re-hitting
+  // accessible-resources per hit.
+  let cachedSite = null;
+  const getSite = async () => {
+    if (cachedSite) return cachedSite;
+    cachedSite = await resolveSite(atlSession);
+    return cachedSite;
   };
-  // Keep a title lookup so get_confluence_page results can surface a
-  // human-readable page title in the UI tooltip.
-  const pageTitleById = new Map();
+  // Track resolved page metadata so the badge tooltip / link can use a
+  // human-readable page title and URL, and so a completion event can
+  // upgrade an in-flight badge that only had a pageId at start time.
+  const pageMetaById = new Map();
 
   const toolHandlers = {
     search_confluence: async (input) => {
@@ -340,17 +343,21 @@ async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
         return { hits: [], count: 0, _reason: 'Atlassian not connected.' };
       }
       try {
-        const cloudId = await getCloudId();
+        const { cloudId, siteUrl } = await getSite();
         if (!cloudId) {
           return { hits: [], count: 0, _error: 'No accessible Confluence site' };
         }
-        const hits = await searchConfluence(atlSession, cloudId, input?.query || '', 5);
+        const query = input?.query || '';
+        const hits = await searchConfluence(atlSession, cloudId, query, 5, siteUrl);
         for (const hit of hits) {
-          if (hit.id && hit.title) pageTitleById.set(hit.id, hit.title);
+          if (hit.id) pageMetaById.set(hit.id, { title: hit.title, url: hit.url });
         }
         return {
-          query: input?.query,
-          hits: hits.map((h) => ({ id: h.id, title: h.title, excerpt: h.excerpt })),
+          query,
+          // Include the search UI URL so the SE can click the badge and
+          // land on Confluence's own search results for that query.
+          search_url: buildConfluenceSearchUrl(siteUrl, query),
+          hits: hits.map((h) => ({ id: h.id, title: h.title, excerpt: h.excerpt, url: h.url })),
           count: hits.length,
         };
       } catch (err) {
@@ -360,14 +367,22 @@ async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
     get_confluence_page: async (input) => {
       if (!accessToken) return { _reason: 'Atlassian not connected.', count: 0 };
       try {
-        const cloudId = await getCloudId();
+        const { cloudId, siteUrl } = await getSite();
         if (!cloudId) return { _error: 'No accessible Confluence site', count: 0 };
-        const page = await fetchConfluencePage(atlSession, cloudId, input?.pageId || '');
-        if (page?.title) pageTitleById.set(page.id, page.title);
+        const page = await fetchConfluencePage(atlSession, cloudId, input?.pageId || '', siteUrl);
+        if (page?.id) {
+          // Prefer the URL from the page fetch (fully qualified) over a
+          // possibly-null one cached from search.
+          pageMetaById.set(page.id, {
+            title: page.title,
+            url: page.url || pageMetaById.get(page.id)?.url || null,
+          });
+        }
         const excerpt = page?.excerpt || '';
         return {
           id: page?.id,
           title: page?.title,
+          url: page?.url,
           excerpt,
           count: excerpt.trim().length > 0 ? 1 : 0,
         };
@@ -412,14 +427,18 @@ async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
         const toolResults = [];
         for (const toolUse of toolUses) {
           // The badge's tooltip surfaces the input verbatim — for a
-          // get_confluence_page call, swap in the resolved title once we
-          // know it, so the SE sees "Snowflake landing schema" instead
-          // of an opaque page id.
+          // get_confluence_page call, swap in the resolved title (and URL
+          // if we already have it from a prior search) so the SE sees
+          // "Snowflake landing schema" with a working link instead of an
+          // opaque page id.
           const rawInput = toolUse.input || {};
-          const badgeInput =
-            toolUse.name === 'get_confluence_page' && pageTitleById.has(rawInput.pageId)
-              ? { ...rawInput, title: pageTitleById.get(rawInput.pageId) }
-              : rawInput;
+          let badgeInput = rawInput;
+          if (toolUse.name === 'get_confluence_page') {
+            const meta = pageMetaById.get(rawInput.pageId);
+            if (meta) {
+              badgeInput = { ...rawInput, title: meta.title, url: meta.url };
+            }
+          }
 
           send({
             type: 'tool_call_start',
@@ -451,13 +470,27 @@ async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
             const result = await handler(rawInput);
             const ok = !result?._error;
             const count = typeof result?.count === 'number' ? result.count : undefined;
-            // If get_confluence_page just resolved a title, patch the
-            // completion event so the badge tooltip is right without a
-            // second re-render.
-            const completeInput =
-              toolUse.name === 'get_confluence_page' && result?.title
-                ? { ...rawInput, title: result.title }
-                : undefined;
+            // Re-emit input on completion so the badge's tooltip and link
+            // reflect what we actually resolved. For a search: attach the
+            // Confluence search-UI URL so clicking the badge opens the
+            // real search results. For a page fetch: attach the page's
+            // web URL and title so the badge becomes a link to it.
+            let completeInput;
+            if (toolUse.name === 'search_confluence' && result?.search_url) {
+              completeInput = {
+                query: rawInput.query,
+                url: result.search_url,
+                topHit: result.hits?.[0]
+                  ? { title: result.hits[0].title, url: result.hits[0].url }
+                  : null,
+              };
+            } else if (toolUse.name === 'get_confluence_page' && (result?.title || result?.url)) {
+              completeInput = {
+                ...rawInput,
+                title: result.title || pageMetaById.get(rawInput.pageId)?.title,
+                url: result.url || pageMetaById.get(rawInput.pageId)?.url || null,
+              };
+            }
             send({
               type: 'tool_call_complete',
               skillId,
