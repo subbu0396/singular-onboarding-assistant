@@ -166,7 +166,12 @@ export { SKILL1_SYSTEM_BLOCK };
 
 const SKILL2_SYSTEM_BLOCK = {
   type: 'text',
-  text: `You are the Mobile SDK Setup skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused analysis covering per-platform SDK considerations, migration-specific gotchas if moving from another MMP, and SDK configuration implications of the chosen attribution model.
+  text: `You are the Mobile SDK Setup skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused analysis that reads like the SE is talking to THIS client's mobile team, not a generic install guide.
+
+Ground everything you say in the client's actual stack:
+- platforms the client uses (iOS / Android / React Native / Flutter / Unity)
+- the MMP they're on today (if any) and the migration path to the target MMP
+- the attribution model they've chosen and what that means for SDK init
 
 You have three tools:
 - search_github_repos: search the SE's accessible GitHub repos by client name. Use this FIRST when you have a client name.
@@ -175,11 +180,15 @@ You have three tools:
 
 Process:
 1. Call search_github_repos with the client name. Pick the most plausible mobile repo from the results (mobile codebases usually have names containing "ios", "android", "mobile", "app", or match the client brand).
-2. If a plausible mobile repo exists, call fetch_repo_manifests on it. The response includes detected_mmp_vendors — if non-empty, the client already has those MMPs installed; weave that into your analysis ("currently on Adjust 4.32 per Podfile; migration to Singular requires SDK init swap and event-name remap").
-3. Always also call use_form_data so the form's platforms / attribution model are in the picture.
-4. Produce the analysis. Plain prose, no markdown headers, no bullet lists. Cite the repo and manifest path when you reference real code (e.g. "Per app/build.gradle in airtel/mobile, ...").
+2. If a plausible mobile repo exists, call fetch_repo_manifests on it. The response includes detected_mmp_vendors — if non-empty, the client already has those MMPs installed; call it out ("currently on Adjust 4.32 per Podfile — migration to Singular requires SDK init swap, event-name remap, and dedupe on the linkme handler").
+3. Always call use_form_data so the client's platforms and attribution model are in the picture.
+4. Write the analysis. Every sentence should either be about THIS client's stack or a specific gotcha a mobile engineer on their team needs to know before they start. Cite the repo and manifest path when you ground a claim in real code (e.g. "Per app/build.gradle in airtel/mobile, ..."). No generic filler.
 
-If search_github_repos returns nothing relevant, do not invent repo content — just use the form data and say so.
+If search_github_repos returns nothing relevant, do not invent repo content — use the form data, name the specific platforms, and say the analysis is based on the form since no repo was reachable.
+
+Output rules:
+- 120-220 words, plain prose, no markdown headers, no bullet lists.
+- Address the SE reading this; write actionable pointers, not general SDK theory.
 
 Three tool calls is the typical maximum.`,
   cache_control: { type: 'ephemeral' },
@@ -309,7 +318,99 @@ Output rules:
   cache_control: { type: 'ephemeral' },
 };
 
-export { SKILL4_SYSTEM_BLOCK, SKILL4_REST_SYSTEM_BLOCK };
+// Skill 4 tool-using agent — Claude drives Confluence search + page fetch.
+// Replaces the deterministic server-side query derivation so the pipeline
+// UI shows the actual queries Claude ran and which pages it opened.
+
+const SKILL4_AGENT_SYSTEM_BLOCK = {
+  type: 'text',
+  text: `You are the Technical Environment skill in an MMP onboarding agent. Your job is to produce 120-220 words of focused technical analysis that reads like the SE is writing to THIS client's engineering team, not a generic technical brief.
+
+Ground everything you say in the client's actual stack — do not write about hypothetical setups:
+- backend language they use (drives which SDK we recommend and how it initializes)
+- whether they have a data warehouse (drives export landing patterns and freshness monitoring)
+- whether they use a CDP, and which one (drives coexistence decisions)
+- auth method they use for their APIs (drives postback and export auth)
+
+You have three tools to gather grounding material from the SE team's Confluence:
+- search_confluence: search the client's connected Confluence for pages matching a query. Use targeted queries derived from the client's stack (e.g. "Node.js SDK installation", "Snowflake landing schema", "Segment CDP coexistence", "OAuth client-credentials postback"). Run 2-3 different searches so you cover the four axes above.
+- get_confluence_page: fetch the full body of a specific page from a search hit. Use this on the most relevant hit from each search. Skip pages whose titles clearly don't fit this client's stack.
+- use_form_data: read the Technical Environment slice from the form (backendLanguage, hasDataWarehouse, usesCdp, cdpName, authMethod). Always call this so the client's specific values are in the analysis.
+
+Process:
+1. Call use_form_data first so you know what the client's stack actually is.
+2. Run 2-3 search_confluence queries, one per axis that matters for this client. Choose queries that combine their stack values (e.g. if backendLanguage is Node.js and hasDataWarehouse is true, search "Node.js SDK" AND "warehouse landing" separately).
+3. On each search that returned hits, call get_confluence_page for the most relevant title. Skip if no hit is on-point.
+4. Write the analysis. Every sentence should either name a specific value from the client's stack ("their Node.js backend...", "their Snowflake warehouse...") or a concrete pointer from a Confluence page ("Per the 'Snowflake landing schema' runbook, ..."). No generic best-practice filler.
+
+If a search returns zero hits or nothing on-point, don't invent content from the title alone — fall back to what the form says and be honest that no internal runbook covered that piece.
+
+Output rules:
+- 120-220 words, plain prose, no markdown headers, no bullet lists.
+- Address the SE reading this. Write actionable pointers ("their team needs to..."), not textbook theory.
+- No preamble, no closing summary.
+- Do not write the runbook, FAQ, or checklist itself — this is intermediate context.
+
+Four to six tool calls is the typical maximum.`,
+  cache_control: { type: 'ephemeral' },
+};
+
+export const SKILL4_TOOLS = [
+  {
+    name: 'search_confluence',
+    description:
+      "Search the client's connected Confluence for pages matching a query. Returns up to 5 hits with page ids, titles, and short excerpts. Use targeted queries derived from the client's tech stack — one query per axis (backend language, warehouse, CDP, auth).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: {
+          type: 'string',
+          description:
+            'The search query. Combine the client\'s stack values with the concept (e.g. "Node.js SDK installation", "Snowflake landing schema", "Segment CDP coexistence").',
+        },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_confluence_page',
+    description:
+      'Fetch the full body of a specific Confluence page. Use this on the most relevant hit from a search when the title clearly fits the client\'s stack. Returns page title + up to ~2500 chars of body text.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        pageId: {
+          type: 'string',
+          description: 'The page id from a search_confluence hit.',
+        },
+      },
+      required: ['pageId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'use_form_data',
+    description:
+      "Read the Technical Environment slice from the form. Returns backendLanguage, hasDataWarehouse, usesCdp, cdpName, authMethod. Always call this so the client's specific values are grounded in the analysis.",
+    input_schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+];
+
+export function buildSkill4AgentUserPrompt(form) {
+  return `Produce the Technical Environment section analysis for the client.
+
+Client name: "${form.clientName || '(not provided)'}"
+Target MMP: ${getPlatform(form)}
+
+Use your tools to gather the client's stack (use_form_data), then run 2-3 targeted Confluence searches derived from that stack, then open the most relevant page from each search. Write the analysis grounded in the specific values you gathered — no generic filler.`;
+}
+
+export { SKILL4_SYSTEM_BLOCK, SKILL4_REST_SYSTEM_BLOCK, SKILL4_AGENT_SYSTEM_BLOCK };
 
 // --- Skill 5: Go-Live Timeline (Calendar-aware agent) ---
 //
