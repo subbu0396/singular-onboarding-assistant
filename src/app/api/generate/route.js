@@ -69,13 +69,19 @@ Rules that always apply to every document you generate:
 - Use markdown throughout. Use ## for sections, ### for subsections.
 - Use numbered lists for all sequential steps.
 - Use tables for structured data (event mappings, config values, test cases).
-- Use code blocks for any API calls, config snippets, or sample payloads.
 - Write for a technical audience: engineers, technical PMs, solutions engineers.
 - Never use filler language, marketing language, or vague statements.
 - Every step must be independently executable and sequentially ordered.
 - Flag known failure modes, common gotchas, and retry logic where relevant.
 - Be specific: name exact endpoints, headers, parameter names, and expected response shapes where applicable.
-- Do not include a preamble or closing summary. Start directly with the first section header.`,
+- Do not include a preamble or closing summary. Start directly with the first section header.
+
+Code formatting rules (STRICT — malformed code blocks break the rendered document):
+- Every code snippet MUST be inside a fenced block with the language tag on the opening fence: three backticks + language + newline, then code, then three backticks on its own line. Supported tags: swift, kotlin, java, javascript, typescript, python, bash, json, yaml, sql, http.
+- When a fenced code block sits inside a numbered list item, its opening fence starts on a NEW LINE after the list-item text, and the entire block (opening fence, code, closing fence) is indented four spaces from the list-item marker so the markdown parser recognises it inside the list.
+- ALWAYS use ASCII arrows (\`->\`) in code, NEVER Unicode arrows (\`→\`). Same for other operators — plain ASCII only inside code blocks.
+- Never use fenced blocks for prose or bullet content. Fenced blocks are exclusively for code, config, or literal payload examples.
+- Close every fenced block. An unclosed block corrupts every heading that follows it.`,
   cache_control: { type: 'ephemeral' },
 };
 
