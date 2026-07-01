@@ -1,0 +1,18 @@
+{
+  "name": "mmp-onboarding-mcp-service",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Long-lived Node service that runs the MCP-heavy analyst skills for the MMP Onboarding Assistant. Deployed to Render (or any process host) alongside the Vercel front-end, which proxies MCP calls here so they aren't bound by Vercel's serverless timeout budget.",
+  "type": "module",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

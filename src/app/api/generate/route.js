@@ -47,6 +47,11 @@ import {
   searchClientRepos,
   fetchRepoManifests,
 } from '@/lib/server/github';
+import {
+  callRenderSkill2Mcp,
+  callRenderSkill4Mcp,
+  isRenderMcpConfigured,
+} from '@/lib/server/renderMcp';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
@@ -476,6 +481,39 @@ async function runSkill4McpAgent(client, form, atlSession, send) {
         ? `Skill 4 MCP call failed (${err.status}): ${err.message}`
         : err?.message || 'Skill 4 MCP call failed';
     console.error('Skill 4 MCP error — falling back to static prompt', message);
+    return null;
+  }
+}
+
+// When MCP_SERVICE_URL is set on Vercel, the MCP-heavy skills proxy through
+// the Render-hosted service instead of trying to run the MCP connector
+// under Vercel's serverless timeout. The Render call is non-streaming —
+// we get {output, toolCalls} back once it's done, then replay the tool
+// calls as SSE events so the existing SkillProgress UI shows badges.
+async function runSkillViaRender(skillId, send, invoke) {
+  send({ type: 'skill_start', skillId });
+  try {
+    const result = await invoke();
+    for (const call of result.toolCalls || []) {
+      send({
+        type: 'tool_call_start',
+        skillId,
+        toolName: call.toolName || 'mcp_tool',
+        input: call.input || {},
+      });
+      send({
+        type: 'tool_call_complete',
+        skillId,
+        toolName: call.toolName || 'mcp_tool',
+        ok: call.ok !== false,
+      });
+    }
+    send({ type: 'skill_complete', skillId });
+    return result.output || null;
+  } catch (err) {
+    console.error(`skill ${skillId} render mcp failed — falling back`, err?.message || err);
+    // Don't emit skill_error — the caller falls through to a non-MCP path
+    // that emits its own lifecycle events.
     return null;
   }
 }
@@ -944,21 +982,44 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         return { id: skill.id, output };
       }
       if (skill.id === 'sdk_setup' && githubSession?.access_token) {
+        // Preferred path: Render-hosted GitHub MCP call when configured.
+        if (isRenderMcpConfigured()) {
+          const renderOutput = await runSkillViaRender('sdk_setup', send, () =>
+            callRenderSkill2Mcp({ form, ghAccessToken: githubSession.access_token })
+          );
+          if (renderOutput) return { id: skill.id, output: renderOutput };
+          // Render path already emitted skill_start — avoid resetting badges.
+          return {
+            id: skill.id,
+            output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
+          };
+        }
+        // Fallback: Vercel-side tool-using agent hitting the GitHub REST API.
         const skillOutput = await runSkill2GitHubAgent(client, form, githubSession, send);
         if (skillOutput) return { id: skill.id, output: skillOutput };
-        // GitHub agent already emitted skill_start — avoid resetting badges.
         return {
           id: skill.id,
           output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
         };
       }
       if (skill.id === 'tech_env' && atlSession?.access_token) {
+        // Preferred path: Render-hosted Confluence MCP call when configured.
+        if (isRenderMcpConfigured()) {
+          const renderOutput = await runSkillViaRender('tech_env', send, () =>
+            callRenderSkill4Mcp({ form, atlAccessToken: atlSession.access_token })
+          );
+          if (renderOutput) return { id: skill.id, output: renderOutput };
+          return {
+            id: skill.id,
+            output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
+          };
+        }
+        // Fallback: Vercel-side MCP (deprecated) or Confluence REST agent.
         const runner = useMcpConnector()
           ? runSkill4McpAgent
           : runSkill4ConfluenceAgent;
         const skillOutput = await runner(client, form, atlSession, send);
         if (skillOutput) return { id: skill.id, output: skillOutput };
-        // Confluence path already emitted skill_start — avoid resetting tool badges.
         return {
           id: skill.id,
           output: await runSkill(client, skill, form, send, { skipLifecycle: true }),

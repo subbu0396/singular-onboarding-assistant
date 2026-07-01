@@ -170,6 +170,21 @@ If you want Skill 2's Mobile SDK Setup analysis to ground itself in the client's
    ```
 3. The "Connect GitHub" button in the header walks the SE through OAuth. After connecting, Skill 2 runs as a tool-using agent: `search_github_repos` against the client name, `fetch_repo_manifests` on the top match (Podfile / build.gradle / package.json / pubspec.yaml), then synthesizes the SDK-setup analysis citing real manifest paths and surfacing any already-installed MMP vendor (heuristic match for Singular, AppsFlyer, Adjust, Branch, etc.).
 
+### MCP-heavy skills on Render (optional, Phase 6)
+
+Vercel's serverless timeout budget wasn't long enough for Anthropic's MCP connector to complete against vendor MCP servers (Phase 3 hit >50s and never got a response). The workaround is a small companion service running on Render (or any long-lived process host) that holds those calls open as long as they need.
+
+- Companion code lives in [`render-service/`](render-service/) — Express app, three routes (`/health`, `/skill2/mcp`, `/skill4/mcp`).
+- Skill 2 uses [GitHub's official MCP server](https://api.githubcopilot.com/mcp/) with the SE's own GitHub OAuth token; Skill 4 uses [Atlassian Rovo MCP](https://mcp.atlassian.com/v1/mcp/authv2) with the SE's Atlassian OAuth token.
+- Vercel's `/api/generate` proxies to the Render service when `MCP_SERVICE_URL` + `MCP_SERVICE_SECRET` are set. When they're not, both skills quietly fall back to the Vercel REST paths — so the site works whether or not Render is up.
+
+Deploy steps live in [`render-service/README.md`](render-service/README.md). Two env vars need to match on both sides:
+
+```env
+MCP_SERVICE_URL=https://your-render-app.onrender.com
+MCP_SERVICE_SECRET=any_long_random_string  # same value on Render
+```
+
 ### Seeding the RAG knowledge base (optional)
 
 The RAG layer is a no-op if the Supabase + Voyage env vars aren't set — generations just don't get the pattern injection. To populate it:
@@ -213,10 +228,10 @@ src/
 
 ## Status & roadmap
 
-**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), Phase 4 (Google Calendar for Skill 5), and Phase 5 (GitHub for Skill 2) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
+**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), Phase 4 (Google Calendar for Skill 5), Phase 5 (GitHub for Skill 2), and Phase 6 (Render-hosted MCP service for the MCP-heavy skills) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
 
 **Potential next steps** (not currently scheduled):
-- Phase 6 — doc lifecycle: persist generated packages in Supabase, list past generations, shareable read-only links
+- Doc lifecycle: persist generated packages in Supabase, list past generations, shareable read-only links
 - Phase 4 extension — Microsoft Graph (Outlook Calendar) as a second provider for Skill 5
 - Skill 3 — Slack integration for kickoff coordination (the only remaining static analyst skill)
 - A "Salesforce Picker" UI for fuzzy account name search instead of strict equality
