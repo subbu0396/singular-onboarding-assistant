@@ -1,0 +1,27 @@
+# Render Blueprint — deploy this service by pointing Render at this
+# subfolder or by pasting this file into a new Blueprint.
+#
+# Uses Render's "web" service type so the endpoints are HTTP-reachable
+# from Vercel. `starter` plan is enough for the demo — no autoscaling
+# needed since the Vercel front-end fans out synchronously and only
+# ever holds one MCP call in flight per SE.
+
+services:
+  - type: web
+    name: mmp-onboarding-mcp
+    runtime: node
+    plan: starter
+    rootDir: render-service
+    buildCommand: npm install
+    startCommand: npm run start
+    healthCheckPath: /health
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MCP_SERVICE_SECRET
+        sync: false
+      # Optional overrides — leave blank to use defaults.
+      - key: ATLASSIAN_MCP_URL
+        sync: false
+      - key: GITHUB_MCP_URL
+        sync: false
