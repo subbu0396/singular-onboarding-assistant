@@ -12,19 +12,22 @@ import {
   SKILL1_TOOLS,
   SKILL2_SYSTEM_BLOCK,
   SKILL2_TOOLS,
-  SKILL4_REST_SYSTEM_BLOCK,
+  SKILL4_AGENT_SYSTEM_BLOCK,
+  SKILL4_TOOLS,
   SKILL5_SYSTEM_BLOCK,
   buildSkillUserPrompt,
   buildSkill1UserPrompt,
   buildSkill2UserPrompt,
-  buildSkill4UserPrompt,
+  buildSkill4AgentUserPrompt,
   buildSkill5UserPrompt,
   buildFormSlice,
 } from '@/lib/server/claudeClient';
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
 import {
   ensureFreshAtlassianSession,
-  buildConfluenceContextForSkill4,
+  resolveCloudId,
+  searchConfluence,
+  fetchConfluencePage,
 } from '@/lib/server/atlassian';
 import {
   readSession,
@@ -308,64 +311,199 @@ function emitToolEvent(send, skillId, phase, toolName, extra = {}) {
   }
 }
 
-// Skill 4 (default): Confluence REST + Claude — reliable, fires tool badges.
+// Skill 4: Confluence tool-using agent. Claude picks the queries and
+// decides which pages to open, so the pipeline badges reflect the
+// model's actual reasoning instead of a hard-coded server-side loop.
+// Each tool result carries a `count` field the UI uses to color the
+// badge green (has content), amber (call worked but nothing useful),
+// or red (call failed).
 async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
   const skillId = 'tech_env';
   send({ type: 'skill_start', skillId });
 
-  try {
-    const confluenceContext = await buildConfluenceContextForSkill4(
-      atlSession,
-      form,
-      (phase, toolName, payload) => {
-        if (phase === 'start') {
-          emitToolEvent(send, skillId, 'start', toolName, { input: payload });
-        } else {
-          emitToolEvent(send, skillId, 'complete', toolName, {
-            ok: payload?.ok !== false,
-            message: payload?.message,
-          });
+  const accessToken = atlSession?.access_token;
+  // resolveCloudId hits accessible-resources once; cache the result so
+  // multiple search / fetch tool calls don't re-do it every time.
+  let cachedCloudId = null;
+  const getCloudId = async () => {
+    if (cachedCloudId) return cachedCloudId;
+    cachedCloudId = await resolveCloudId(atlSession);
+    return cachedCloudId;
+  };
+  // Keep a title lookup so get_confluence_page results can surface a
+  // human-readable page title in the UI tooltip.
+  const pageTitleById = new Map();
+
+  const toolHandlers = {
+    search_confluence: async (input) => {
+      if (!accessToken) {
+        return { hits: [], count: 0, _reason: 'Atlassian not connected.' };
+      }
+      try {
+        const cloudId = await getCloudId();
+        if (!cloudId) {
+          return { hits: [], count: 0, _error: 'No accessible Confluence site' };
         }
+        const hits = await searchConfluence(atlSession, cloudId, input?.query || '', 5);
+        for (const hit of hits) {
+          if (hit.id && hit.title) pageTitleById.set(hit.id, hit.title);
+        }
+        return {
+          query: input?.query,
+          hits: hits.map((h) => ({ id: h.id, title: h.title, excerpt: h.excerpt })),
+          count: hits.length,
+        };
+      } catch (err) {
+        return { hits: [], count: 0, _error: err?.message || 'search failed' };
       }
-    );
-
-    const stream = client.messages.stream({
-      model: MODEL,
-      max_tokens: SKILL_MAX_TOKENS,
-      system: [SKILL4_REST_SYSTEM_BLOCK],
-      messages: [
-        {
-          role: 'user',
-          content: buildSkill4UserPrompt(form, confluenceContext),
-        },
-      ],
-    });
-
-    let output = '';
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'text_delta'
-      ) {
-        output += event.delta.text;
+    },
+    get_confluence_page: async (input) => {
+      if (!accessToken) return { _reason: 'Atlassian not connected.', count: 0 };
+      try {
+        const cloudId = await getCloudId();
+        if (!cloudId) return { _error: 'No accessible Confluence site', count: 0 };
+        const page = await fetchConfluencePage(atlSession, cloudId, input?.pageId || '');
+        if (page?.title) pageTitleById.set(page.id, page.title);
+        const excerpt = page?.excerpt || '';
+        return {
+          id: page?.id,
+          title: page?.title,
+          excerpt,
+          count: excerpt.trim().length > 0 ? 1 : 0,
+        };
+      } catch (err) {
+        return { _error: err?.message || 'page fetch failed', count: 0 };
       }
-    }
+    },
+    use_form_data: async () =>
+      buildFormSlice(SKILLS.find((s) => s.id === skillId), form),
+  };
 
-    const final = await stream.finalMessage();
-    if (final.stop_reason === 'refusal') {
-      send({
-        type: 'skill_error',
-        skillId,
-        message: 'Refused by safety filters.',
+  const messages = [{ role: 'user', content: buildSkill4AgentUserPrompt(form) }];
+  let finalText = '';
+  let iteration = 0;
+  const SKILL4_MAX_ITERATIONS = 8;
+
+  try {
+    while (iteration++ < SKILL4_MAX_ITERATIONS) {
+      const response = await client.messages.create({
+        model: MODEL,
+        max_tokens: SKILL_MAX_TOKENS,
+        system: [SKILL4_AGENT_SYSTEM_BLOCK],
+        tools: SKILL4_TOOLS,
+        messages,
       });
-      return null;
+
+      if (response.stop_reason === 'refusal') {
+        send({ type: 'skill_error', skillId, message: 'Refused by safety filters.' });
+        return null;
+      }
+
+      for (const block of response.content) {
+        if (block.type === 'text') finalText += block.text;
+      }
+
+      if (response.stop_reason === 'end_turn') break;
+
+      if (response.stop_reason === 'tool_use') {
+        const toolUses = response.content.filter((b) => b.type === 'tool_use');
+        messages.push({ role: 'assistant', content: response.content });
+
+        const toolResults = [];
+        for (const toolUse of toolUses) {
+          // The badge's tooltip surfaces the input verbatim — for a
+          // get_confluence_page call, swap in the resolved title once we
+          // know it, so the SE sees "Snowflake landing schema" instead
+          // of an opaque page id.
+          const rawInput = toolUse.input || {};
+          const badgeInput =
+            toolUse.name === 'get_confluence_page' && pageTitleById.has(rawInput.pageId)
+              ? { ...rawInput, title: pageTitleById.get(rawInput.pageId) }
+              : rawInput;
+
+          send({
+            type: 'tool_call_start',
+            skillId,
+            toolName: toolUse.name,
+            input: badgeInput,
+          });
+
+          const handler = toolHandlers[toolUse.name];
+          if (!handler) {
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok: false,
+              count: 0,
+              message: `Unknown tool: ${toolUse.name}`,
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: unknown tool ${toolUse.name}`,
+              is_error: true,
+            });
+            continue;
+          }
+
+          try {
+            const result = await handler(rawInput);
+            const ok = !result?._error;
+            const count = typeof result?.count === 'number' ? result.count : undefined;
+            // If get_confluence_page just resolved a title, patch the
+            // completion event so the badge tooltip is right without a
+            // second re-render.
+            const completeInput =
+              toolUse.name === 'get_confluence_page' && result?.title
+                ? { ...rawInput, title: result.title }
+                : undefined;
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok,
+              count,
+              input: completeInput,
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: JSON.stringify(result),
+            });
+          } catch (err) {
+            send({
+              type: 'tool_call_complete',
+              skillId,
+              toolName: toolUse.name,
+              ok: false,
+              count: 0,
+              message: err?.message || 'Tool execution failed',
+            });
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: toolUse.id,
+              content: `Error: ${err?.message || 'tool failed'}`,
+              is_error: true,
+            });
+          }
+        }
+
+        messages.push({ role: 'user', content: toolResults });
+        continue;
+      }
+
+      break;
     }
 
     send({ type: 'skill_complete', skillId });
-    return output.trim() || null;
+    return finalText.trim() || null;
   } catch (err) {
-    const message = err?.message || 'Skill 4 Confluence agent failed';
-    console.error('Skill 4 Confluence REST error — falling back to static prompt', message);
+    const message =
+      err instanceof Anthropic.APIError
+        ? `Skill 4 Confluence agent failed (${err.status}): ${err.message}`
+        : err?.message || 'Skill 4 Confluence agent failed';
+    console.error('Skill 4 Confluence agent error — falling back to static prompt', message);
     send({ type: 'skill_error', skillId, message });
     return null;
   }
@@ -467,9 +605,17 @@ async function runSkill2GitHubAgent(client, form, githubSession, send) {
             const result = await handler(toolUse.input || {});
             // Treat a successful API call as ok=true even if it returned
             // zero items — the UI shouldn't flag a no-results search as
-            // failed. Real failures populate `_error`.
+            // failed. Real failures populate `_error`. The UI uses `count`
+            // to differentiate "call succeeded with content" (green) from
+            // "call succeeded but empty" (amber).
             const ok = !result?._error;
-            send({ type: 'tool_call_complete', skillId, toolName: toolUse.name, ok });
+            let count;
+            if (toolUse.name === 'search_github_repos') {
+              count = Array.isArray(result?.items) ? result.items.length : 0;
+            } else if (toolUse.name === 'fetch_repo_manifests') {
+              count = Array.isArray(result?.manifests) ? result.manifests.length : 0;
+            }
+            send({ type: 'tool_call_complete', skillId, toolName: toolUse.name, ok, count });
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,

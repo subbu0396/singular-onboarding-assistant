@@ -34,6 +34,8 @@ const TOOL_LABELS = {
   mcp_tool: 'Confluence',
   searchConfluence: 'Confluence: search',
   getConfluencePage: 'Confluence: page',
+  search_confluence: 'Confluence: search',
+  get_confluence_page: 'Confluence: page',
   confluence_mcp_connect: 'Confluence: connecting',
   google_calendar: 'Google Calendar',
   microsoft_graph: 'Outlook Calendar',
@@ -66,26 +68,78 @@ function StateIndicator({ state, index }) {
   return <span className="text-[10px] text-slate-600">{index + 1}</span>;
 }
 
+// Compact preview of the tool's input, used as the badge tooltip so the SE
+// can hover to see what Claude actually searched for or which page it
+// opened. Handles the two shapes we emit today; unknown keys fall back to
+// a JSON stringify so a new tool never leaves an empty tooltip.
+function summarizeInput(toolName, input) {
+  if (!input || typeof input !== 'object') return null;
+  if (input.query) return `query: "${input.query}"`;
+  if (input.title) return `page: ${input.title}`;
+  if (input.pageId) return `pageId: ${input.pageId}`;
+  if (input.clientName) return `client: ${input.clientName}`;
+  if (input.fullName) return `repo: ${input.fullName}`;
+  if (input.window?.start && input.window?.end) {
+    return `window: ${input.window.start.slice(0, 10)} → ${input.window.end.slice(0, 10)}`;
+  }
+  try {
+    const s = JSON.stringify(input);
+    return s.length > 80 ? `${s.slice(0, 77)}…` : s;
+  } catch {
+    return null;
+  }
+}
+
+// Three-tier badge state:
+//   running  → indigo pulse
+//   ok+content → emerald green with count (green = "found something useful")
+//   ok+empty  → amber ("call worked but returned nothing on-point")
+//   failed   → grey with error message in tooltip
 function ToolBadge({ call }) {
   const label = labelForTool(call.toolName);
+  const inputSummary = summarizeInput(call.toolName, call.input);
+  const runningTooltip = inputSummary || label;
+
   if (call.status === 'running') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300">
+      <span
+        title={runningTooltip}
+        className="inline-flex items-center gap-1 rounded-full bg-slate-800 px-2 py-0.5 text-[10px] text-slate-300"
+      >
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />
         {label}
       </span>
     );
   }
+
   const ok = call.ok !== false;
+  const hasCount = typeof call.count === 'number';
+  // Retrieval-shaped tools (use_form_data, get_confluence_page) don't have
+  // a meaningful "hit count" concept, so absent count is treated as OK.
+  const empty = ok && hasCount && call.count === 0;
+
+  const tone = !ok
+    ? 'bg-slate-800 text-slate-400'
+    : empty
+      ? 'bg-amber-900/30 text-amber-300 ring-1 ring-amber-800/60'
+      : 'bg-emerald-900/40 text-emerald-300';
+  const icon = !ok ? '·' : empty ? '⚠' : '✓';
+  const countSuffix = ok && hasCount && call.count > 0 ? ` · ${call.count}` : '';
+
+  const tooltipParts = [];
+  if (inputSummary) tooltipParts.push(inputSummary);
+  if (!ok && call.message) tooltipParts.push(`error: ${call.message}`);
+  else if (empty) tooltipParts.push('call succeeded but returned no results');
+  else if (ok && hasCount) tooltipParts.push(`${call.count} result${call.count === 1 ? '' : 's'}`);
+  const tooltip = tooltipParts.length ? tooltipParts.join(' — ') : label;
+
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${
-        ok
-          ? 'bg-emerald-900/40 text-emerald-300'
-          : 'bg-slate-800 text-slate-400'
-      }`}
+      title={tooltip}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] ${tone}`}
     >
-      {ok ? '✓' : '·'} {label}
+      {icon} {label}
+      {countSuffix}
     </span>
   );
 }

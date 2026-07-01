@@ -140,12 +140,17 @@ export default function Home() {
     if (event.type === 'tool_call_start') {
       setToolCalls((prev) => {
         const existing = prev[event.skillId] || [];
-        const withoutDup = existing.filter((c) => c.toolName !== event.toolName);
         return {
           ...prev,
           [event.skillId]: [
-            ...withoutDup,
-            { toolName: event.toolName, status: 'running', ok: null },
+            ...existing,
+            {
+              toolName: event.toolName,
+              status: 'running',
+              ok: null,
+              input: event.input || null,
+              count: null,
+            },
           ],
         };
       });
@@ -154,6 +159,8 @@ export default function Home() {
     if (event.type === 'tool_call_complete') {
       setToolCalls((prev) => {
         const existing = prev[event.skillId] || [];
+        // Match the most recent running call for this toolName so we don't
+        // accidentally close a badge that's already done.
         const idx = existing
           .map((c, i) => ({ c, i }))
           .reverse()
@@ -164,6 +171,11 @@ export default function Home() {
           ...next[idx.i],
           status: 'done',
           ok: event.ok !== false,
+          count: typeof event.count === 'number' ? event.count : next[idx.i].count,
+          // If the server re-sent input on completion (e.g. resolved a
+          // Confluence page title), prefer the fresher shape.
+          input: event.input || next[idx.i].input,
+          message: event.message || null,
         };
         return { ...prev, [event.skillId]: next };
       });
