@@ -79,7 +79,7 @@ async function consumeSSE(res, onEvent) {
 
 export default function Home() {
   const [view, setView] = useState('form');
-  const [intakeMode, setIntakeMode] = useState('form');
+  const [chatOpen, setChatOpen] = useState(false);
   const [intakePrefill, setIntakePrefill] = useState(null);
   const [intakeMeta, setIntakeMeta] = useState(null);
   // Bumped when a chat completes so the Form remounts and re-seeds its
@@ -423,22 +423,7 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
-        {view === 'form' && intakeMode === 'chat' && (
-          <IntakeChat
-            onComplete={(filledForm, meta) => {
-              setIntakePrefill(filledForm);
-              setIntakeMeta({
-                missingFields: meta?.missingFields || [],
-                source: meta?.source || 'chat',
-              });
-              setFormKey((k) => k + 1);
-              setIntakeMode('form');
-            }}
-            onCancel={() => setIntakeMode('form')}
-          />
-        )}
-
-        {view === 'form' && intakeMode === 'form' && (
+        {view === 'form' && (
           <>
             <div className="mb-6 flex flex-col items-center gap-3 text-center">
               <div>
@@ -451,7 +436,7 @@ export default function Home() {
               </div>
               <button
                 type="button"
-                onClick={() => setIntakeMode('chat')}
+                onClick={() => setChatOpen(true)}
                 disabled={isLoading}
                 className="btn-secondary text-xs disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -471,6 +456,20 @@ export default function Home() {
             <RecentGenerations onOpen={openPastGeneration} />
           </>
         )}
+
+        <IntakeChat
+          open={chatOpen}
+          onClose={() => setChatOpen(false)}
+          onComplete={(filledForm, meta) => {
+            setIntakePrefill(filledForm);
+            setIntakeMeta({
+              missingFields: meta?.missingFields || [],
+              source: meta?.source || 'chat',
+            });
+            setFormKey((k) => k + 1);
+            setChatOpen(false);
+          }}
+        />
 
         {view === 'results' && (
           <ResultsTabs

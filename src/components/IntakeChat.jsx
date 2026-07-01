@@ -1,5 +1,46 @@
 import { useEffect, useRef, useState } from 'react';
 
+// Sidebar shell — slides in from the right, backdrop closes it. Escape too.
+function SidebarShell({ open, onClose, children }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    document.addEventListener('keydown', onKey);
+    // Prevent body scroll while the panel is open.
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [open, onClose]);
+
+  return (
+    <div
+      className={`fixed inset-0 z-40 ${open ? '' : 'pointer-events-none'}`}
+      aria-hidden={!open}
+    >
+      <div
+        className={`absolute inset-0 bg-slate-950/70 backdrop-blur-sm transition-opacity duration-200 ${
+          open ? 'opacity-100' : 'opacity-0'
+        }`}
+        onClick={onClose}
+      />
+      <aside
+        role="dialog"
+        aria-label="Conversational intake"
+        className={`absolute right-0 top-0 flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-950 shadow-2xl transition-transform duration-200 sm:max-w-lg ${
+          open ? 'translate-x-0' : 'translate-x-full'
+        }`}
+      >
+        {children}
+      </aside>
+    </div>
+  );
+}
+
 const GREETING = {
   role: 'assistant',
   content:
@@ -11,7 +52,7 @@ const GREETING = {
  * clarifying questions, then emits a filled INITIAL_FORM_STATE-shaped object.
  * On completion the parent gets the form and switches to review mode.
  */
-export default function IntakeChat({ onComplete, onCancel }) {
+export default function IntakeChat({ open, onComplete, onClose }) {
   const [messages, setMessages] = useState([GREETING]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -21,6 +62,17 @@ export default function IntakeChat({ onComplete, onCancel }) {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, loading]);
+
+  // Reset the conversation each time the sidebar closes so re-opening
+  // starts fresh (the SE either finished the intake or bailed).
+  useEffect(() => {
+    if (!open) {
+      setMessages([GREETING]);
+      setInput('');
+      setError(null);
+      setLoading(false);
+    }
+  }, [open]);
 
   const send = async () => {
     const text = input.trim();
@@ -81,29 +133,30 @@ export default function IntakeChat({ onComplete, onCancel }) {
   };
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <div className="mb-4 flex items-center justify-between">
+    <SidebarShell open={open} onClose={onClose}>
+      <div className="flex items-start justify-between border-b border-slate-800 px-5 py-4">
         <div>
           <p className="text-xs font-medium uppercase tracking-wider text-indigo-400">
             Conversational Intake
           </p>
-          <h2 className="mt-1 text-xl font-semibold text-white">
+          <h2 className="mt-1 text-lg font-semibold text-white">
             Describe the client
           </h2>
         </div>
         <button
           type="button"
-          onClick={onCancel}
-          className="text-xs text-slate-400 hover:text-slate-200"
+          onClick={onClose}
+          className="text-lg text-slate-400 hover:text-slate-200"
+          aria-label="Close intake chat"
         >
-          ← Back to form
+          ✕
         </button>
       </div>
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50">
+      <div className="flex flex-1 flex-col overflow-hidden">
         <div
           ref={scrollRef}
-          className="max-h-[55vh] min-h-[280px] space-y-3 overflow-y-auto px-5 py-4"
+          className="flex-1 space-y-3 overflow-y-auto px-5 py-4"
         >
           {messages.map((m, i) => (
             <div
@@ -160,10 +213,10 @@ export default function IntakeChat({ onComplete, onCancel }) {
             </button>
           </div>
           <p className="mt-1 text-[11px] text-slate-500">
-            Enter to send, Shift+Enter for newline. The chat ends when I have enough to pre-fill the form.
+            Enter to send, Shift+Enter for newline. Chat ends when I have enough to pre-fill the form.
           </p>
         </div>
       </div>
-    </div>
+    </SidebarShell>
   );
 }
