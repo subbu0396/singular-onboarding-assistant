@@ -1,6 +1,32 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+// Defensive fixups so a small model slip (unclosed fence, Unicode arrows
+// in code, weird spacing after the opening fence) doesn't corrupt the
+// whole doc — we saw a Swift snippet render as plain text before a
+// numbered-list item because its opening fence went missing. All fixes
+// are conservative: we only touch strings inside/around code fences.
+function sanitizeMarkdown(content) {
+  if (!content) return content;
+  let out = String(content);
+
+  // Auto-close an unclosed fenced block at the very end of the doc so
+  // it doesn't swallow everything below.
+  const fenceCount = (out.match(/^```/gm) || []).length;
+  if (fenceCount % 2 === 1) {
+    out = `${out}\n\`\`\`\n`;
+  }
+
+  // Inside every fenced block, replace Unicode arrows with ASCII so the
+  // code renders as intended. Left alone outside fences (prose can
+  // legitimately use →).
+  out = out.replace(/```([\s\S]*?)```/g, (match, body) =>
+    '```' + body.replace(/→/g, '->').replace(/⇒/g, '=>') + '```'
+  );
+
+  return out;
+}
 
 function getWordCount(text) {
   if (!text) return 0;
@@ -24,6 +50,7 @@ export default function DocCard({
   const [copied, setCopied] = useState(false);
   const wordCount = getWordCount(content);
   const readingTime = getReadingTime(wordCount);
+  const sanitized = useMemo(() => sanitizeMarkdown(content), [content]);
 
   const handleCopy = async () => {
     try {
@@ -91,7 +118,7 @@ export default function DocCard({
           </div>
         ) : content ? (
           <div className="markdown-body max-h-[70vh] overflow-y-auto pr-2">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{sanitized}</ReactMarkdown>
           </div>
         ) : null}
       </div>
