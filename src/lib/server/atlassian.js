@@ -328,6 +328,3 @@ export async function buildConfluenceContextForSkill4(session, form, emitTool) {
   return { cloudId, queries, pages, searched: queries.length > 0 };
 }
 
-export function useMcpConnector() {
-  return process.env.ATLASSIAN_USE_MCP_CONNECTOR === 'true';
-}

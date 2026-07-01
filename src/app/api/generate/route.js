@@ -12,7 +12,6 @@ import {
   SKILL1_TOOLS,
   SKILL2_SYSTEM_BLOCK,
   SKILL2_TOOLS,
-  SKILL4_SYSTEM_BLOCK,
   SKILL4_REST_SYSTEM_BLOCK,
   SKILL5_SYSTEM_BLOCK,
   buildSkillUserPrompt,
@@ -25,9 +24,7 @@ import {
 import { lookupSalesforceClientReal } from '@/lib/server/salesforce';
 import {
   ensureFreshAtlassianSession,
-  getMcpUrl,
   buildConfluenceContextForSkill4,
-  useMcpConnector,
 } from '@/lib/server/atlassian';
 import {
   readSession,
@@ -47,10 +44,6 @@ import {
   searchClientRepos,
   fetchRepoManifests,
 } from '@/lib/server/github';
-import {
-  callRenderSkill4Mcp,
-  isRenderMcpConfigured,
-} from '@/lib/server/renderMcp';
 import { retrievePatterns } from '@/lib/retrievePatterns';
 
 const MODEL = 'claude-sonnet-4-6';
@@ -58,10 +51,7 @@ const MAX_TOKENS = 6000;
 const SKILL_MAX_TOKENS = 1500;
 const SKILL1_MAX_ITERATIONS = 4;
 const SKILL2_MAX_ITERATIONS = 5;
-const MCP_BETA = 'mcp-client-2025-11-20';
-const ATLASSIAN_MCP_SERVER_NAME = 'atlassian';
 const DOC_STREAM_TIMEOUT_MS = 120_000;
-const SKILL4_MCP_TIMEOUT_MS = 45_000;
 
 const CACHED_SYSTEM_BLOCK = {
   type: 'text',
@@ -381,141 +371,6 @@ async function runSkill4ConfluenceAgent(client, form, atlSession, send) {
   }
 }
 
-// Skill 4 (opt-in via ATLASSIAN_USE_MCP_CONNECTOR=true): Anthropic MCP connector.
-// Can hang 60s+ on Atlassian cold start — kept for experimentation only.
-async function runSkill4McpAgent(client, form, atlSession, send) {
-  const skillId = 'tech_env';
-  send({ type: 'skill_start', skillId });
-
-  let output = '';
-  const activeMcpToolByIndex = new Map();
-
-  const runMcp = async () => {
-    const stream = client.beta.messages.stream({
-      model: MODEL,
-      max_tokens: SKILL_MAX_TOKENS,
-      system: [SKILL4_SYSTEM_BLOCK],
-      messages: [{ role: 'user', content: buildSkill4UserPrompt(form) }],
-      mcp_servers: [
-        {
-          type: 'url',
-          url: getMcpUrl(),
-          name: ATLASSIAN_MCP_SERVER_NAME,
-          authorization_token: atlSession.access_token,
-        },
-      ],
-      tools: [{ type: 'mcp_toolset', mcp_server_name: ATLASSIAN_MCP_SERVER_NAME }],
-      betas: [MCP_BETA],
-    });
-
-    emitToolEvent(send, skillId, 'start', 'confluence_mcp_connect', {
-      input: { url: getMcpUrl() },
-    });
-
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_start' &&
-        event.content_block?.type === 'mcp_tool_use'
-      ) {
-        emitToolEvent(send, skillId, 'complete', 'confluence_mcp_connect', { ok: true });
-        const toolName = event.content_block.name || 'mcp_tool';
-        activeMcpToolByIndex.set(event.index, toolName);
-        emitToolEvent(send, skillId, 'start', toolName, {
-          input: event.content_block.input || {},
-        });
-      }
-      if (
-        event.type === 'content_block_stop' &&
-        activeMcpToolByIndex.has(event.index)
-      ) {
-        const toolName = activeMcpToolByIndex.get(event.index);
-        activeMcpToolByIndex.delete(event.index);
-        emitToolEvent(send, skillId, 'complete', toolName, { ok: true });
-      }
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta?.type === 'text_delta'
-      ) {
-        output += event.delta.text;
-      }
-    }
-
-    const final = await stream.finalMessage();
-    if (final.stop_reason === 'refusal') {
-      send({
-        type: 'skill_error',
-        skillId,
-        message: 'Refused by safety filters.',
-      });
-      return null;
-    }
-
-    send({ type: 'skill_complete', skillId });
-    return output.trim() || null;
-  };
-
-  const timeout = new Promise((_, reject) => {
-    setTimeout(
-      () => reject(new Error(`MCP connector timed out after ${SKILL4_MCP_TIMEOUT_MS}ms`)),
-      SKILL4_MCP_TIMEOUT_MS
-    );
-  });
-
-  try {
-    return await Promise.race([runMcp(), timeout]);
-  } catch (err) {
-    emitToolEvent(send, skillId, 'complete', 'confluence_mcp_connect', {
-      ok: false,
-      message: err?.message,
-    });
-    for (const [, toolName] of activeMcpToolByIndex) {
-      emitToolEvent(send, skillId, 'complete', toolName, {
-        ok: false,
-        message: err?.message || 'MCP call failed',
-      });
-    }
-    activeMcpToolByIndex.clear();
-    const message =
-      err instanceof Anthropic.APIError
-        ? `Skill 4 MCP call failed (${err.status}): ${err.message}`
-        : err?.message || 'Skill 4 MCP call failed';
-    console.error('Skill 4 MCP error — falling back to static prompt', message);
-    return null;
-  }
-}
-
-// When MCP_SERVICE_URL is set on Vercel, the MCP-heavy skills proxy through
-// the Render-hosted service instead of trying to run the MCP connector
-// under Vercel's serverless timeout. The Render call is non-streaming —
-// we get {output, toolCalls} back once it's done, then replay the tool
-// calls as SSE events so the existing SkillProgress UI shows badges.
-async function runSkillViaRender(skillId, send, invoke) {
-  send({ type: 'skill_start', skillId });
-  try {
-    const result = await invoke();
-    for (const call of result.toolCalls || []) {
-      send({
-        type: 'tool_call_start',
-        skillId,
-        toolName: call.toolName || 'mcp_tool',
-        input: call.input || {},
-      });
-      send({
-        type: 'tool_call_complete',
-        skillId,
-        toolName: call.toolName || 'mcp_tool',
-        ok: call.ok !== false,
-      });
-    }
-    send({ type: 'skill_complete', skillId });
-    return result.output || null;
-  } catch (err) {
-    console.error(`skill ${skillId} render mcp failed — falling back`, err?.message || err);
-    // Don't emit skill_error — the caller falls through to a non-MCP path
-    // that emits its own lifecycle events.
-    return null;
-  }
-}
 
 // Skill 2: when GitHub is connected, run as a tool-using agent that searches
 // the SE's accessible repos by client name and fetches SDK manifests from
@@ -992,22 +847,11 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         };
       }
       if (skill.id === 'tech_env' && atlSession?.access_token) {
-        // Preferred path: Render-hosted Confluence MCP call when configured.
-        if (isRenderMcpConfigured()) {
-          const renderOutput = await runSkillViaRender('tech_env', send, () =>
-            callRenderSkill4Mcp({ form, atlAccessToken: atlSession.access_token })
-          );
-          if (renderOutput) return { id: skill.id, output: renderOutput };
-          return {
-            id: skill.id,
-            output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
-          };
-        }
-        // Fallback: Vercel-side MCP (deprecated) or Confluence REST agent.
-        const runner = useMcpConnector()
-          ? runSkill4McpAgent
-          : runSkill4ConfluenceAgent;
-        const skillOutput = await runner(client, form, atlSession, send);
+        // Direct Confluence REST call — every MCP path we tried against
+        // Atlassian's Rovo server (Vercel Edge in Phase 3, Render in
+        // Phase 6) hit unbounded server-side latency. REST is fast and
+        // reliable and grounds Skill 4 in real Confluence content.
+        const skillOutput = await runSkill4ConfluenceAgent(client, form, atlSession, send);
         if (skillOutput) return { id: skill.id, output: skillOutput };
         return {
           id: skill.id,
