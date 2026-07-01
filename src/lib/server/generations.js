@@ -9,7 +9,7 @@
 import { getSupabaseClient } from '@/lib/supabase';
 
 const SHARE_TTL_MS = 24 * 60 * 60 * 1000;
-const RECENT_LIMIT = 20;
+const RECENT_LIMIT = 10;
 
 function randomShareToken() {
   const bytes = new Uint8Array(16);

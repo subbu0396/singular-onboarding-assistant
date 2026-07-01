@@ -44,7 +44,7 @@ export default function RecentGenerations({ onOpen }) {
     <div className="mx-auto mt-10 max-w-2xl rounded-xl border border-slate-800 bg-slate-900/40 p-4 sm:p-5">
       <div className="mb-3 flex items-baseline justify-between">
         <p className="text-xs font-medium uppercase tracking-wider text-indigo-400">
-          Recent generations
+          Recent Generated Forms
         </p>
         <button
           type="button"
