@@ -1,5 +1,8 @@
-# Render Blueprint — deploy this service by pointing Render at this
-# subfolder or by pasting this file into a new Blueprint.
+# Render Blueprint — lives at the repo root because Render only detects
+# Blueprints from `render.yaml` on the primary branch's root. The service
+# it deploys lives in the render-service/ subfolder — `rootDir` below
+# tells Render to install/run from there and leave the Next.js app that
+# ships to Vercel alone.
 #
 # Uses Render's "web" service type so the endpoints are HTTP-reachable
 # from Vercel. `starter` plan is enough for the demo — no autoscaling
