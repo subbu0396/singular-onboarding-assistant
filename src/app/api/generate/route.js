@@ -48,7 +48,6 @@ import {
   fetchRepoManifests,
 } from '@/lib/server/github';
 import {
-  callRenderSkill2Mcp,
   callRenderSkill4Mcp,
   isRenderMcpConfigured,
 } from '@/lib/server/renderMcp';
@@ -982,19 +981,9 @@ async function runAgent(client, form, ragContext, docTypes, sfSession, atlSessio
         return { id: skill.id, output };
       }
       if (skill.id === 'sdk_setup' && githubSession?.access_token) {
-        // Preferred path: Render-hosted GitHub MCP call when configured.
-        if (isRenderMcpConfigured()) {
-          const renderOutput = await runSkillViaRender('sdk_setup', send, () =>
-            callRenderSkill2Mcp({ form, ghAccessToken: githubSession.access_token })
-          );
-          if (renderOutput) return { id: skill.id, output: renderOutput };
-          // Render path already emitted skill_start — avoid resetting badges.
-          return {
-            id: skill.id,
-            output: await runSkill(client, skill, form, send, { skipLifecycle: true }),
-          };
-        }
-        // Fallback: Vercel-side tool-using agent hitting the GitHub REST API.
+        // GitHub's hosted MCP server rejects our classic OAuth-app tokens
+        // (needs Copilot-issued ones), so Skill 2 stays on the Vercel-side
+        // REST tool-using agent from Phase 5 — same grounding, no MCP.
         const skillOutput = await runSkill2GitHubAgent(client, form, githubSession, send);
         if (skillOutput) return { id: skill.id, output: skillOutput };
         return {

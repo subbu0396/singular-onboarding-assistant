@@ -19,7 +19,6 @@
 
 import express from 'express';
 import { runSkill4Mcp } from './skills/skill4.js';
-import { runSkill2Mcp } from './skills/skill2.js';
 
 const PORT = process.env.PORT || 10000;
 
@@ -57,23 +56,6 @@ app.post('/skill4/mcp', requireSharedSecret, async (req, res) => {
     console.error('skill4 mcp failed', err?.message || err);
     res.status(502).json({
       error: 'skill4 mcp failed',
-      detail: err?.message || String(err),
-    });
-  }
-});
-
-app.post('/skill2/mcp', requireSharedSecret, async (req, res) => {
-  const { form, ghAccessToken } = req.body || {};
-  if (!ghAccessToken) {
-    return res.status(400).json({ error: 'ghAccessToken is required' });
-  }
-  try {
-    const result = await runSkill2Mcp({ form, ghAccessToken });
-    res.json(result);
-  } catch (err) {
-    console.error('skill2 mcp failed', err?.message || err);
-    res.status(502).json({
-      error: 'skill2 mcp failed',
       detail: err?.message || String(err),
     });
   }
