@@ -1,6 +1,6 @@
 # MMP Onboarding Assistant
 
-> Generate tailored onboarding documents for any Mobile Measurement Platform (Singular, AppsFlyer, Adjust, Branch, Firebase, …) from a tech-stack form or a client SOW. Three docs, in parallel, streamed token-by-token, grounded in a curated knowledge base — plus optional live Salesforce CRM lookup.
+> Generate tailored onboarding documents for any Mobile Measurement Platform (Singular, AppsFlyer, Adjust, Branch, Firebase, …) from a tech-stack form. Three docs, in parallel, streamed token-by-token, grounded in a curated knowledge base and per-SE OAuth into Salesforce, Confluence, Google Calendar, and GitHub.
 
 **Live demo:** [singular-onboarding-assistant.vercel.app](https://singular-onboarding-assistant.vercel.app/)
 
@@ -18,7 +18,7 @@ Solutions engineers onboarding new clients to an MMP rewrite the same docs every
 
 ## What this does
 
-An SE fills a 5-section form — or uploads the client's SOW — and gets three tailored documents in ~30 seconds:
+An SE fills a 5-section form and gets three tailored documents in ~30 seconds:
 
 | Document | Audience | Purpose |
 |---|---|---|
@@ -78,11 +78,10 @@ A few PM-level decisions that shaped the build:
 ## Key features
 
 - **Six-skill agent pipeline** with per-skill progress indicators streamed to the UI
-- **Document upload extraction** — drop a PDF SOW, Claude reads it natively via document blocks and auto-fills the form (`output_config.json_schema` for guaranteed-valid JSON output)
 - **RAG over curated integration patterns** — pre-seeded patterns per MMP / export method / auth pattern surface in the prompt context based on the client's stack
 - **Salesforce per-SE OAuth** — each SE connects their own SF account; tokens are encrypted in cookies and never reach the browser as readable text; CSRF state validation on the callback
 - **Streaming SSE** with per-doc deltas buffered through `requestAnimationFrame` to avoid React jank during high-throughput token streams
-- **Hardened API routes** — origin checks on the export endpoint, document content treated as untrusted input in the extract endpoint, abort-signal timeouts on outbound calls
+- **Hardened API routes** — origin checks on the export endpoint, abort-signal timeouts on outbound calls
 - **Three export formats** — Markdown, PDF, DOCX, all generated client-side or via a same-origin endpoint with size caps
 
 ## Try it locally
@@ -196,7 +195,6 @@ curl -X POST https://your-deploy.vercel.app/api/admin/add-pattern \
 src/
 ├── app/api/                              # App Router API routes
 │   ├── auth/salesforce/                  #   OAuth (login, callback, logout, status)
-│   ├── extract/                          #   PDF / text → structured JSON via Claude
 │   ├── generate/                         #   The 6-skill agent pipeline
 │   └── admin/add-pattern/                #   RAG knowledge-base ingest (gated)
 ├── pages/

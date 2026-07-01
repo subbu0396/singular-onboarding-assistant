@@ -1,6 +1,4 @@
 import { useState } from 'react';
-import DocUpload from '@/components/DocUpload';
-import { mergeExtractedFields } from '@/lib/mapExtractedFields';
 import {
   SECTIONS,
   INDUSTRIES,
@@ -158,10 +156,6 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
   const update = (field, value, errorKey = field) => {
     setForm((prev) => ({ ...prev, [field]: value }));
     clearError(errorKey);
-  };
-
-  const mergeExtracted = (extracted) => {
-    setForm((prev) => mergeExtractedFields(prev, extracted));
   };
 
   const handleNext = () => {
@@ -441,14 +435,6 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-2xl">
-      <DocUpload onExtracted={mergeExtracted} />
-
-      <div className="mb-6 flex items-center gap-3">
-        <hr className="flex-1 border-slate-700" />
-        <span className="text-xs text-slate-500">or fill manually</span>
-        <hr className="flex-1 border-slate-700" />
-      </div>
-
       {/* Stepper nav */}
       <nav className="mb-8" aria-label="Form sections">
         <div className="flex flex-wrap gap-2">

@@ -12,10 +12,8 @@ function getMigrationNote(form) {
   return ` They are migrating from ${form.currentMmp} to ${platform}.`;
 }
 
-function getDocSourceNote(form) {
-  return form._docUploaded === true
-    ? 'Note: Requirements were extracted from a client-provided document. Treat them as confirmed unless marked ambiguous.'
-    : 'Note: Requirements were entered manually by the integrations team.';
+function getDocSourceNote() {
+  return 'Note: Requirements were entered manually by the integrations team.';
 }
 
 function buildRagSection(ragContext) {
