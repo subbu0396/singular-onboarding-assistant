@@ -186,6 +186,16 @@ MCP_SERVICE_URL=https://your-render-app.onrender.com
 MCP_SERVICE_SECRET=any_long_random_string  # same value on Render
 ```
 
+### Doc lifecycle: save, list, share (Phase 7)
+
+Every completed generation is persisted to Supabase automatically. The homepage shows a "Recent generations" list under the form; clicking Open reloads a past package into the results view with no re-run of the pipeline. Each row also gets a 24-hour public share link — the **Copy share link** button in the results header puts a `https://your-domain/share/<token>` URL on the clipboard that renders the three docs read-only (no form, no navigation back into the app). Expired links return 410; unknown ones return 404.
+
+Setup:
+
+1. Apply the migration in [`supabase/generations.sql`](supabase/generations.sql) to your Supabase project (via the SQL editor or `supabase db push`).
+2. Existing `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` env vars cover this — no new env vars needed.
+3. When Supabase isn't configured, autosave silently no-ops and the recent-generations list stays hidden. The core pipeline still works.
+
 ### Seeding the RAG knowledge base (optional)
 
 The RAG layer is a no-op if the Supabase + Voyage env vars aren't set — generations just don't get the pattern injection. To populate it:
@@ -229,10 +239,9 @@ src/
 
 ## Status & roadmap
 
-**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), Phase 4 (Google Calendar for Skill 5), Phase 5 (GitHub for Skill 2), and Phase 6 (Render-hosted MCP service for the MCP-heavy skills) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
+**Current:** Internal showcase / portfolio project. Phase 1 (agent pipeline), Phase 2 (Salesforce for Skill 1), Phase 3 (Confluence for Skill 4), Phase 4 (Google Calendar for Skill 5), Phase 5 (GitHub for Skill 2), Phase 6 (Render-hosted MCP service), and Phase 7 (doc lifecycle: save / list / share) are live in production. Only Skill 3 (Integration Type) is still a static prompt.
 
 **Potential next steps** (not currently scheduled):
-- Doc lifecycle: persist generated packages in Supabase, list past generations, shareable read-only links
 - Phase 4 extension — Microsoft Graph (Outlook Calendar) as a second provider for Skill 5
 - Skill 3 — Slack integration for kickoff coordination (the only remaining static analyst skill)
 - A "Salesforce Picker" UI for fuzzy account name search instead of strict equality

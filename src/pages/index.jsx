@@ -1,7 +1,8 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import Form from '@/components/Form';
 import ResultsTabs from '@/components/ResultsTabs';
 import IntegrationsMenu from '@/components/IntegrationsMenu';
+import RecentGenerations from '@/components/RecentGenerations';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -87,9 +88,12 @@ export default function Home() {
   const [skillStatus, setSkillStatus] = useState(EMPTY_SKILL_STATUS);
   const [toolCalls, setToolCalls] = useState(EMPTY_TOOL_CALLS);
   const [skillContexts, setSkillContexts] = useState({});
+  const [savedGeneration, setSavedGeneration] = useState(null);
 
   const deltaBufferRef = useRef({});
   const flushScheduledRef = useRef(false);
+  // Guard so autosave fires exactly once per completed generation.
+  const savedForRef = useRef(null);
 
   const flushDeltas = useCallback(() => {
     flushScheduledRef.current = false;
@@ -291,8 +295,47 @@ export default function Home() {
 
   const retryDoc = useCallback((docType) => regenerateDoc(docType), [regenerateDoc]);
 
+  const openPastGeneration = useCallback(async (id) => {
+    try {
+      const res = await fetch(`/api/generations/${id}`);
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const g = await res.json();
+      // Restore the results view with the stored docs; no pipeline re-run.
+      savedForRef.current = `${g.form_snapshot?.clientName}::${g.form_snapshot?.targetGoLiveDate}::${g.form_snapshot?.targetMmp}`;
+      setFormData(g.form_snapshot || {});
+      setDocuments({
+        [DOC_TYPES.RUNBOOK]: g.documents?.runbook || '',
+        [DOC_TYPES.FAQ]: g.documents?.faq || '',
+        [DOC_TYPES.CHECKLIST]: g.documents?.checklist || '',
+      });
+      setErrors(EMPTY_ERRORS);
+      setLoadingDocs(NONE_LOADING);
+      // Mark all skills complete so the pipeline row shows a finished
+      // state rather than sitting at 'pending' for a doc that isn't
+      // being regenerated.
+      setSkillStatus(
+        Object.fromEntries(SKILL_IDS.map((id) => [id, 'complete']))
+      );
+      setToolCalls(EMPTY_TOOL_CALLS);
+      setSkillContexts({});
+      setSavedGeneration({
+        id: g.id,
+        share_token: g.share_token || null,
+        share_expires_at: g.share_expires_at || null,
+        created_at: g.created_at,
+      });
+      setError(null);
+      setLoadingStep('');
+      setIsLoading(false);
+      setView('results');
+    } catch (err) {
+      setError(err?.message || 'Failed to open past generation');
+    }
+  }, []);
+
   const handleStartOver = () => {
     deltaBufferRef.current = {};
+    savedForRef.current = null;
     setView('form');
     setFormData(null);
     setDocuments(EMPTY_DOCS);
@@ -301,10 +344,46 @@ export default function Home() {
     setSkillStatus(EMPTY_SKILL_STATUS);
     setToolCalls(EMPTY_TOOL_CALLS);
     setSkillContexts({});
+    setSavedGeneration(null);
     setError(null);
     setLoadingStep('');
     setIsLoading(false);
   };
+
+  // Phase 7 auto-save: once all three docs are non-empty and no doc is
+  // still streaming, persist the generation and stash the returned
+  // share_token so the Share button in the results view can use it.
+  useEffect(() => {
+    if (isLoading) return;
+    if (!formData) return;
+    if (!DOC_KEYS.every((k) => documents[k]?.trim())) return;
+    if (DOC_KEYS.some((k) => loadingDocs[k])) return;
+    if (DOC_KEYS.some((k) => errors[k])) return;
+    // Guard: only save once per generation (client name + go-live is
+    // enough entropy to distinguish two consecutive submissions).
+    const generationKey = `${formData.clientName}::${formData.targetGoLiveDate}::${formData.targetMmp}`;
+    if (savedForRef.current === generationKey) return;
+    savedForRef.current = generationKey;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/generations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ form: formData, documents }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          console.warn('auto-save failed', body?.error || res.status);
+          return;
+        }
+        const saved = await res.json();
+        setSavedGeneration(saved);
+      } catch (err) {
+        console.warn('auto-save network error', err?.message || err);
+      }
+    })();
+  }, [isLoading, formData, documents, loadingDocs, errors]);
 
   return (
     <div className="min-h-screen bg-slate-950">
@@ -342,6 +421,7 @@ export default function Home() {
               error={error}
               onClearError={() => setError(null)}
             />
+            <RecentGenerations onOpen={openPastGeneration} />
           </>
         )}
 
@@ -362,6 +442,7 @@ export default function Home() {
             skillStatus={skillStatus}
             toolCalls={toolCalls}
             skillContexts={skillContexts}
+            savedGeneration={savedGeneration}
           />
         )}
       </main>
