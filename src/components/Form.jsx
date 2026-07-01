@@ -139,12 +139,26 @@ function GenerationProgress({ loadingStep }) {
   );
 }
 
-export default function Form({ onSubmit, isLoading, loadingStep, error, onClearError }) {
+export default function Form({
+  onSubmit,
+  isLoading,
+  loadingStep,
+  error,
+  onClearError,
+  initialForm,
+  initialAutofillMeta,
+}) {
   const [currentStep, setCurrentStep] = useState(0);
-  const [form, setForm] = useState(INITIAL_FORM_STATE);
+  // When the SE came in via conversational or Salesforce intake, seed the
+  // form with their filled object so they land straight in review mode.
+  const [form, setForm] = useState(() =>
+    initialForm ? { ...INITIAL_FORM_STATE, ...initialForm } : INITIAL_FORM_STATE
+  );
   const [errors, setErrors] = useState({});
   const [demoBanner, setDemoBanner] = useState(false);
-  const [autofillBanner, setAutofillBanner] = useState(null);
+  const [autofillBanner, setAutofillBanner] = useState(
+    initialAutofillMeta || null
+  );
 
   const clearError = (errorKey) => {
     setErrors((prev) => {
