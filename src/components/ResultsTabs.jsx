@@ -4,6 +4,7 @@ import { hasAllDocuments } from '@/lib/combineDocuments';
 import { DOWNLOAD_FORMATS, exportCombinedPackage } from '@/lib/exportDocument';
 import DocCard from './DocCard';
 import SkillProgress from './SkillProgress';
+import ShareButton from './ShareButton';
 
 const TAB_ORDER = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
 
@@ -23,6 +24,7 @@ export default function ResultsTabs({
   skillStatus,
   toolCalls,
   skillContexts,
+  savedGeneration,
 }) {
   const hasSkillActivity =
     skillStatus &&
@@ -59,9 +61,12 @@ export default function ResultsTabs({
             <p className="mt-2 text-xs text-indigo-400">{streamingStep}</p>
           )}
         </div>
-        <button type="button" onClick={onStartOver} className="btn-secondary shrink-0">
-          Start Over
-        </button>
+        <div className="flex shrink-0 items-start gap-3">
+          <ShareButton savedGeneration={savedGeneration} />
+          <button type="button" onClick={onStartOver} className="btn-secondary">
+            Start Over
+          </button>
+        </div>
       </div>
 
       <SkillProgress
