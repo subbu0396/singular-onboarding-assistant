@@ -174,8 +174,9 @@ If you want Skill 2's Mobile SDK Setup analysis to ground itself in the client's
 
 Vercel's serverless timeout budget wasn't long enough for Anthropic's MCP connector to complete against vendor MCP servers (Phase 3 hit >50s and never got a response). The workaround is a small companion service running on Render (or any long-lived process host) that holds those calls open as long as they need.
 
-- Companion code lives in [`render-service/`](render-service/) — Express app, three routes (`/health`, `/skill2/mcp`, `/skill4/mcp`).
-- Skill 2 uses [GitHub's official MCP server](https://api.githubcopilot.com/mcp/) with the SE's own GitHub OAuth token; Skill 4 uses [Atlassian Rovo MCP](https://mcp.atlassian.com/v1/mcp/authv2) with the SE's Atlassian OAuth token.
+- Companion code lives in [`render-service/`](render-service/) — Express app with two routes (`/health`, `/skill4/mcp`).
+- Skill 4 uses [Atlassian Rovo MCP](https://mcp.atlassian.com/v1/mcp/authv2) with the SE's Atlassian OAuth token.
+- Skill 2 was originally scoped for MCP too, against [GitHub's hosted MCP server](https://api.githubcopilot.com/mcp/), but that server rejects our classic OAuth-app tokens (it wants Copilot-issued ones). Skill 2 stays on the Vercel-side REST tool-agent from Phase 5 — same grounding in real GitHub codebases, just not via MCP.
 - Vercel's `/api/generate` proxies to the Render service when `MCP_SERVICE_URL` + `MCP_SERVICE_SECRET` are set. When they're not, both skills quietly fall back to the Vercel REST paths — so the site works whether or not Render is up.
 
 Deploy steps live in [`render-service/README.md`](render-service/README.md). Two env vars need to match on both sides:

@@ -2,7 +2,7 @@
 
 Long-lived Node service that runs the MCP-heavy analyst skills for the main app. Sits alongside the Vercel front-end; the front-end proxies MCP calls to this service so they aren't bound by Vercel's serverless timeout budget.
 
-- **What runs here:** Skill 2 (Mobile SDK Setup via the GitHub MCP server) and Skill 4 (Technical Environment via Atlassian's Rovo MCP server).
+- **What runs here:** Skill 4 (Technical Environment via Atlassian's Rovo MCP server). Skill 2 was originally in scope too but GitHub's hosted MCP server rejects classic OAuth-app tokens — Skill 2 stays on the Vercel-side REST tool-agent from Phase 5.
 - **What still runs on Vercel:** Everything else — form UI, OAuth flows, session cookies, RAG, doc streaming, and the non-MCP paths for every skill (which are the fallback when this service isn't configured or a call fails).
 
 ## Endpoints
@@ -11,7 +11,6 @@ Long-lived Node service that runs the MCP-heavy analyst skills for the main app.
 | --- | --- | --- | --- |
 | `GET` | `/health` | — | `{ok, service, ts}` |
 | `POST` | `/skill4/mcp` | `{form, atlAccessToken}` | `{output, toolCalls, stop_reason}` |
-| `POST` | `/skill2/mcp` | `{form, ghAccessToken}` | `{output, toolCalls, stop_reason}` |
 
 All non-`/health` requests require `Authorization: Bearer <MCP_SERVICE_SECRET>`.
 

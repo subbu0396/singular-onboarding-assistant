@@ -1,10 +1,16 @@
 // Thin client for the Render-hosted MCP service.
 //
-// Skills 2 and 4 call this when MCP_SERVICE_URL is set — the Render side
-// runs the Anthropic MCP-connector call against Atlassian (Confluence) or
-// GitHub with real timeout budget, then returns a summarized
+// Skill 4 calls this when MCP_SERVICE_URL is set — the Render side runs
+// the Anthropic MCP-connector call against Atlassian Rovo Confluence
+// with real timeout budget, then returns a summarized
 // {output, toolCalls, stop_reason} shape that the caller turns back into
 // tool_call_start / tool_call_complete SSE events for the pipeline UI.
+//
+// Skill 2's Render endpoint was removed — GitHub's hosted MCP server
+// requires a Copilot-issued token which our OAuth-app tokens aren't,
+// so Anthropic returned "Error while communicating with MCP server"
+// on every call. Skill 2 stays on its Vercel-side REST tool-agent path
+// (Phase 5), which already grounds analysis in real GitHub repos.
 //
 // When MCP_SERVICE_URL is unset or the call fails, callers fall through
 // to their existing REST paths — same graceful-fallback pattern as
@@ -46,8 +52,4 @@ async function postJson(path, body, { timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
 
 export function callRenderSkill4Mcp({ form, atlAccessToken }) {
   return postJson('/skill4/mcp', { form, atlAccessToken });
-}
-
-export function callRenderSkill2Mcp({ form, ghAccessToken }) {
-  return postJson('/skill2/mcp', { form, ghAccessToken });
 }

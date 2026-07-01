@@ -26,5 +26,3 @@ services:
       # Optional overrides — leave blank to use defaults.
       - key: ATLASSIAN_MCP_URL
         sync: false
-      - key: GITHUB_MCP_URL
-        sync: false
