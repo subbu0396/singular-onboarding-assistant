@@ -28,7 +28,7 @@ All non-`/health` requests require `Authorization: Bearer <MCP_SERVICE_SECRET>`.
 ## Deploy to Render
 
 1. In [Render dashboard](https://dashboard.render.com/) → **New** → **Blueprint**
-2. Connect the `singular-onboarding-assistant` repo and pick `render-service/render.yaml`
+2. Connect the `singular-onboarding-assistant` repo — Render will auto-detect the `render.yaml` at the repo root, which points `rootDir` at this `render-service/` subfolder
 3. Set the three secrets (`ANTHROPIC_API_KEY`, `MCP_SERVICE_SECRET`; leave the MCP URL overrides blank unless you're pointing at a different server)
 4. Deploy. Note the public URL (e.g. `https://mmp-onboarding-mcp.onrender.com`).
 5. Back in Vercel project settings → env vars:
