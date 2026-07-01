@@ -20,6 +20,7 @@ import {
   getDemoFormData,
   DEMO_SECTION_INDEX,
 } from '@/lib/formConfig';
+import SalesforceAutofill from './SalesforceAutofill';
 
 function FieldError({ message }) {
   if (!message) return null;
@@ -143,6 +144,7 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
   const [form, setForm] = useState(INITIAL_FORM_STATE);
   const [errors, setErrors] = useState({});
   const [demoBanner, setDemoBanner] = useState(false);
+  const [autofillBanner, setAutofillBanner] = useState(null);
 
   const clearError = (errorKey) => {
     setErrors((prev) => {
@@ -209,6 +211,20 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
     onClearError?.();
   };
 
+  const handleAutofill = (filledForm, meta) => {
+    // Merge onto whatever the SE has already typed — but treat the autofilled
+    // fields as authoritative when both sides have a value, since the SE just
+    // asked Claude to populate from Salesforce.
+    setForm((prev) => ({ ...prev, ...filledForm }));
+    setErrors({});
+    setDemoBanner(false);
+    setAutofillBanner({
+      missingFields: meta?.missingFields || [],
+      source: meta?.source || null,
+    });
+    onClearError?.();
+  };
+
   const sectionIsDirty = isSectionDirty(form, section.key);
 
   const renderSection = () => {
@@ -235,6 +251,11 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
               />
               <FieldError message={errors.clientName} />
             </div>
+            <SalesforceAutofill
+              clientName={form.clientName}
+              onAutofill={handleAutofill}
+              disabled={isLoading}
+            />
             <SelectField
               id="targetMmp"
               label="Target MMP Platform"
@@ -471,6 +492,21 @@ export default function Form({ onSubmit, isLoading, loadingStep, error, onClearE
       {demoBanner && (
         <div className="mb-4 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2.5 text-sm text-emerald-400">
           Form prefilled with Airtel Digital demo data
+        </div>
+      )}
+
+      {autofillBanner && (
+        <div className="mb-4 rounded-lg border border-indigo-500/30 bg-indigo-500/10 px-3.5 py-2.5 text-sm text-indigo-300">
+          <p>
+            Form populated from{' '}
+            {autofillBanner.source === 'salesforce_real' ? 'Salesforce' : 'Salesforce (demo)'}
+            . Review each section before generating.
+          </p>
+          {autofillBanner.missingFields.length > 0 && (
+            <p className="mt-1 text-xs text-amber-300">
+              Fill in: {autofillBanner.missingFields.join(', ')}
+            </p>
+          )}
         </div>
       )}
 
