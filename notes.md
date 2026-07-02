@@ -1,6 +1,6 @@
 # MMP Onboarding Assistant — Build Notes
 
-Personal progress log of what's been built, why, what broke along the way, and what's queued. Paste into Notion or read on GitHub. Reflects state through PR #33.
+Personal progress log of what's been built, why, what broke along the way, and what's queued. Paste into Notion or read on GitHub. Reflects state through PR #36.
 
 **Live demo:** [singular-onboarding-assistant.vercel.app](https://singular-onboarding-assistant.vercel.app/)
 **Repo:** [subbu0396/singular-onboarding-assistant](https://github.com/subbu0396/singular-onboarding-assistant)
@@ -25,6 +25,7 @@ A six-skill Claude agent pipeline that takes a 5-section onboarding form and emi
 | 6 | Companion service on Render | Attempted MCP-heavy skills off Vercel — retired | Artifact |
 | 7 | Doc lifecycle | Supabase save + list + 24h share | Live |
 | 8 | Intake alternatives | Salesforce autofill + conversational chat sidebar | Live |
+| 9 | Guardrails + evals | Schema validation, rate limits, prompt-injection defense, intake golden set | Live |
 | — | Skill 3 — Integration Type | Still a static prompt | Open |
 
 ---
@@ -198,6 +199,56 @@ Filling the 5-section form takes 3–5 minutes. Phase 8 adds two AI-driven ways 
 
 ---
 
+## Phase 9 — Guardrails + evals (before multi-tenancy)
+
+Ran a hardening pass before shipping SE auth so the failure modes we know about were closed off first, and so future prompt / model changes have a baseline to compare against.
+
+### Guardrails (PR #35)
+
+**Intake schema validator** (`src/lib/server/intakeTool.js` — `validateIntakeInput`).
+Runs on every `capture_client_intake` tool call, from both the SF autofill route and the chat route.
+- Drops enum values not in the allowed lists (single-value and array enums both), pushes the field into `missingFields` so the SE reviews it.
+- Coerces bad `targetGoLiveDate` strings to null via strict `/^\d{4}-\d{2}-\d{2}$/` regex.
+- Caps free-text length — `clientName` 120, `cdpName` 80, notes 800, `confidenceNotes` 300. Prevents both form-state bloat and prompt-injection surface on the next generation (SE notes flow back into Skill 5's prompt).
+- Filters non-boolean values on `hasDataWarehouse` / `usesCdp` so the `ToggleField` doesn't misread truthy strings.
+
+**Per-IP rate limiter** (`src/lib/server/rateLimit.js`).
+In-memory sliding window, keyed off `x-forwarded-for`. Best-effort across Vercel instances but sufficient given the app is currently internal — the cost of a missed limit is bounded by `ANTHROPIC_API_KEY` spend, not data leaks. When SE auth lands, key on identity; if we scale beyond one region, move the store to Upstash.
+- `/api/generate` — 10/min (most expensive, 6-skill pipeline + tool loops).
+- `/api/intake/salesforce` — 15/min.
+- `/api/intake/converse` — 30/min.
+- Returns 429 with `Retry-After`.
+
+**Prompt-injection defense.**
+`CACHED_SYSTEM_BLOCK` teaches Claude to treat `<external_content>` tags and tool results as data, never instructions. SF autofill wraps the account block in `<external_content source="salesforce_account">`. The intake system prompt gets the same rule so the chat path is covered. Verified with an injected "ignore previous instructions" string in a SF field — form still populated real fields, the injection was ignored.
+
+**Chat length caps.**
+`/api/intake/converse` truncates individual messages to 4000 chars and keeps only the last 30 turns before calling Claude. A stuck client can't grow history indefinitely.
+
+### Evals (PR #36)
+
+Offline golden-set eval that calls the real Anthropic API. Not in CI — evals cost tokens and run intentionally before shipping prompt or model changes.
+
+**Layout** (`evals/`):
+- `fixtures/intake/*.json` — description + expected populated form. 8 seed fixtures.
+- `lib/scoring.mjs` — field-by-field scorer: enum exact match, array Jaccard, string exact/substring, boolean exact, date exact / ±3 days.
+- `runners/intake.mjs` — loads fixtures, calls `runIntakeExtraction()` (the same function production uses), prints per-fixture + per-field summary, writes JSON report to `evals/results/` (git-ignored).
+- `README.md` — how to run, scoring semantics, fixture format, roadmap.
+
+**First run baseline: 0.98 overall.** 16 of 17 fields perfect, `industry` at 0.88 (one fixture where "Indian telco" doesn't cleanly map to the `INDUSTRIES` enum). That's the number future changes get compared against.
+
+**Fixture coverage** — verbose paragraph, terse bullet list, email-thread style, minimal info (discipline test — model must NOT hallucinate industry from just a company name), vague date ("mid-August" — correct answer is null, not a guess), enterprise multi-platform, gaming migration, OTT thin.
+
+**Queued (documented in `evals/README.md`, not built):**
+- `eval:docs` — LLM-judge over generated Runbook / FAQ / Checklist on {specificity, actionability, no-hallucination, structure}. Heavy (each fixture = full pipeline).
+- `eval:smoke` — end-to-end smoke: canonical form → assert 6 skills complete + 3 docs non-empty. Cheap crash-regression catcher (e.g. the `runAgent` signature bug that shipped twice).
+
+Both need either a running dev server or a small refactor of `/api/generate` to expose the pipeline as a library function.
+
+**Small refactor** — `intakeTool.js`'s `formConfig` import switched from `@/lib/formConfig` alias to `../formConfig.js` relative path so both Next and Node ESM resolve it.
+
+---
+
 ## Recent quality passes (post-Phase-7)
 
 - **Skill 4 → real tool-using agent** (PR #27). Replaces the earlier deterministic server-side query derivation with a Claude tool loop. One badge per query, one per page fetch — instead of a single "search" / "page" badge in a burst at the end.
@@ -259,6 +310,9 @@ The Render service's `MCP_SERVICE_URL` / `MCP_SERVICE_SECRET` are no longer read
 | [#31](https://github.com/subbu0396/singular-onboarding-assistant/pull/31) | Phase 8: Salesforce autofill for onboarding intake | Shared `capture_client_intake` tool + `/api/intake/salesforce` route + autofill UI |
 | [#32](https://github.com/subbu0396/singular-onboarding-assistant/pull/32) | Conversational intake — describe the client instead of typing | `/api/intake/converse` chat endpoint + `IntakeChat` component + Form `initialForm` prop |
 | [#33](https://github.com/subbu0396/singular-onboarding-assistant/pull/33) | Open intake chat as a sidebar over the form | Right-side sliding panel, backdrop / X / Escape to close, conversation resets on close |
+| [#34](https://github.com/subbu0396/singular-onboarding-assistant/pull/34) | Update notes.md — Phase 8 intake alternatives through PR #33 | Documentation refresh |
+| [#35](https://github.com/subbu0396/singular-onboarding-assistant/pull/35) | Phase 9 guardrails: schema validation, rate limits, prompt-injection hygiene | `validateIntakeInput`, per-IP rate limiter, `<external_content>` tags + system-prompt rule, chat length caps |
+| [#36](https://github.com/subbu0396/singular-onboarding-assistant/pull/36) | Phase 9 evals: intake extraction golden set | `evals/` layout, 8 seed fixtures, field-by-field scorer, `npm run eval:intake` |
 
 Earlier PRs (before this notes file was started) covered Phase 1 and Phase 2.
 
@@ -268,13 +322,14 @@ Earlier PRs (before this notes file was started) covered Phase 1 and Phase 2.
 
 Listed roughly by impact-per-effort:
 
-1. **SE authentication + multi-tenancy.** Ranked as the highest-impact next step. Every OAuth cookie becomes user-scoped, generations list filters by SE identity, share links get proper owner semantics. Needs a login flow (magic-link or Google sign-in) + Supabase schema changes.
-2. **Streaming for the intake chat.** Currently non-streamed JSON per turn — each turn is <5s so it's fine, but SSE token deltas would feel snappier. Reuse the pattern from `/api/generate`.
-3. **Prompt-caching observability.** Read `usage.cache_read_input_tokens` off the Claude responses and surface it in the pipeline row as a "cache hit N%" indicator per skill.
-4. **Doc versioning / regeneration diffs.** Regenerate creates a new `generations` row instead of replacing. Add a version selector + side-by-side diff.
-5. **Salesforce fuzzy picker + custom fields.** Typeahead over SF accounts (fuzzy match instead of strict equality) plus custom-field support (`Platforms__c`, `Current_MMP__c`) feeding into both Skill 1 and Phase 8's autofill.
-6. **Microsoft Graph (Outlook)** as a second calendar provider for Skill 5.
-7. **Skill 3 grounding.** The last remaining static analyst skill. Slack-for-kickoff-coordination is one candidate; a CDP config source is another.
+1. **SE authentication + multi-tenancy.** Next up. Every OAuth cookie becomes user-scoped, generations list filters by SE identity, share links get proper owner semantics, rate-limit key flips from IP to identity. Needs a login flow (magic-link or Google sign-in) + Supabase schema changes.
+2. **Doc-quality eval + smoke eval** (called out in `evals/README.md`). LLM-judge over generated Runbook / FAQ / Checklist and a canonical-form smoke. Needs either a running dev server during eval or a small refactor to expose the pipeline as a library function.
+3. **Streaming for the intake chat.** Currently non-streamed JSON per turn — each turn is <5s so it's fine, but SSE token deltas would feel snappier. Reuse the pattern from `/api/generate`.
+4. **Prompt-caching observability.** Read `usage.cache_read_input_tokens` off the Claude responses and surface it in the pipeline row as a "cache hit N%" indicator per skill.
+5. **Doc versioning / regeneration diffs.** Regenerate creates a new `generations` row instead of replacing. Add a version selector + side-by-side diff.
+6. **Salesforce fuzzy picker + custom fields.** Typeahead over SF accounts (fuzzy match instead of strict equality) plus custom-field support (`Platforms__c`, `Current_MMP__c`) feeding into both Skill 1 and Phase 8's autofill.
+7. **Microsoft Graph (Outlook)** as a second calendar provider for Skill 5.
+8. **Skill 3 grounding.** The last remaining static analyst skill. Slack-for-kickoff-coordination is one candidate; a CDP config source is another.
 
 ---
 
