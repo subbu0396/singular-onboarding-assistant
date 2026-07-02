@@ -115,7 +115,11 @@ export default function SignInGate({ children }) {
     } catch {
       // no-op
     }
-    setGuestMode(true);
+    // Full reload so useSession in downstream components re-reads
+    // sessionStorage and the guest banner + auto-save skip both light up.
+    // Setting local state alone would render children but leave those
+    // consumers stuck on the stale snapshot from their initial mount.
+    window.location.reload();
   };
 
   return (
