@@ -1,0 +1,25 @@
+{
+  "id": "airtel-migration",
+  "notes": "Enterprise migration off AppsFlyer to Singular. Verbose form with every field populated. Tests whether the pipeline actually grounds output in the client's specific stack (Node.js backend, Snowflake, OAuth 2.0) rather than emitting generic textbook advice.",
+  "form": {
+    "clientName": "Airtel Digital",
+    "targetMmp": "Singular",
+    "industry": "E-commerce",
+    "primaryMarket": "India",
+    "platforms": ["iOS", "Android"],
+    "currentMmp": "AppsFlyer",
+    "attributionModel": "Last Touch",
+    "integrationMethods": ["S2S Postbacks", "Google Ads"],
+    "dataExportMethods": ["Snowflake"],
+    "eventTrackingMethod": "SDK Events",
+    "backendLanguage": "Node.js",
+    "hasDataWarehouse": true,
+    "usesCdp": false,
+    "cdpName": "",
+    "authMethod": "OAuth 2.0",
+    "targetGoLiveDate": "2026-08-15",
+    "onboardingUrgency": "Standard 4-6 weeks",
+    "seAvailabilityNotes": "Free for kickoff Tue/Thu 10-12 IST next 2 weeks; on PTO 5-9 Aug.",
+    "engineeringAvailabilityNotes": "Mobile team in code freeze 12-16 Aug; iOS lead on PTO 19-26 Aug."
+  }
+}

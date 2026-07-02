@@ -1,0 +1,25 @@
+{
+  "id": "rovio-gaming-thin",
+  "notes": "Sparse form — only the required fields populated. Tests whether the pipeline still produces useful output when most tech-env fields are empty, without hallucinating specifics.",
+  "form": {
+    "clientName": "Rovio",
+    "targetMmp": "Singular",
+    "industry": "Gaming",
+    "primaryMarket": "Europe",
+    "platforms": ["iOS", "Android", "Unity"],
+    "currentMmp": "Adjust",
+    "attributionModel": "Multi-Touch",
+    "integrationMethods": ["S2S Postbacks", "SKAdNetwork"],
+    "dataExportMethods": [],
+    "eventTrackingMethod": "SDK Events",
+    "backendLanguage": "Other",
+    "hasDataWarehouse": false,
+    "usesCdp": false,
+    "cdpName": "",
+    "authMethod": "API Key",
+    "targetGoLiveDate": "2026-09-30",
+    "onboardingUrgency": "Standard 4-6 weeks",
+    "seAvailabilityNotes": "",
+    "engineeringAvailabilityNotes": ""
+  }
+}
