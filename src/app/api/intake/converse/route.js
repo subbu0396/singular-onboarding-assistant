@@ -2,10 +2,18 @@ export const runtime = 'nodejs';
 export const maxDuration = 60;
 
 import Anthropic from '@anthropic-ai/sdk';
-import { INTAKE_TOOL, INTAKE_TOOL_NAME, mergeIntakeIntoForm } from '@/lib/server/intakeTool';
+import {
+  INTAKE_TOOL,
+  INTAKE_TOOL_NAME,
+  mergeIntakeIntoForm,
+  validateIntakeInput,
+} from '@/lib/server/intakeTool';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 1500;
+const MAX_MESSAGE_CHARS = 4000;
+const MAX_HISTORY_TURNS = 30;
 
 const SYSTEM_PROMPT = `You are the intake copilot for a Singular Solutions Engineer. Your job is to gather enough context about a client onboarding to populate the ${INTAKE_TOOL_NAME} tool.
 
@@ -27,9 +35,20 @@ Ground rules:
 
 function toClaudeMessages(history) {
   if (!Array.isArray(history)) return [];
-  return history
+  const filtered = history
     .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-    .map((m) => ({ role: m.role, content: m.content }));
+    // Cap per-message length so a pasted wall of text can't blow token limits
+    // or become a prompt-injection surface. Truncated messages keep enough
+    // signal for the model to still make progress on intake.
+    .map((m) => ({
+      role: m.role,
+      content: m.content.length > MAX_MESSAGE_CHARS
+        ? `${m.content.slice(0, MAX_MESSAGE_CHARS)}\n\n[…truncated by server]`
+        : m.content,
+    }));
+  // Trim overall history to the most recent turns so a client that keeps
+  // appending forever can't grow indefinitely.
+  return filtered.slice(-MAX_HISTORY_TURNS);
 }
 
 // Convert Claude's structured content blocks back into a plain-text
@@ -45,6 +64,9 @@ function extractAssistantText(content) {
 }
 
 export async function POST(req) {
+  const limit = checkRateLimit(req, { bucket: 'intake', limit: 30, windowMs: 60_000 });
+  if (!limit.ok) return rateLimitResponse(limit.retryAfter);
+
   if (!process.env.ANTHROPIC_API_KEY) {
     return Response.json(
       { error: 'ANTHROPIC_API_KEY is not configured' },
@@ -94,18 +116,19 @@ export async function POST(req) {
   );
 
   if (toolUse) {
-    const toolInput = toolUse.input || {};
-    // Any text Claude emitted alongside the tool call becomes a friendly
-    // handoff line ("Here's what I've captured — review and edit anything.").
+    // Run the same schema guardrail that Salesforce autofill uses: drop bad
+    // enums, coerce bad dates to null, cap free-text length. droppedFields
+    // is folded into missingFields so the SE sees what to review.
+    const { input: validated } = validateIntakeInput(toolUse.input || {});
     const handoffText =
       extractAssistantText(response.content) ||
       "Here's what I captured. Review each section — edit anything I got wrong or left blank, then generate.";
     return Response.json({
       type: 'intake_ready',
       assistantText: handoffText,
-      form: mergeIntakeIntoForm(toolInput),
-      missingFields: Array.isArray(toolInput.missingFields) ? toolInput.missingFields : [],
-      confidenceNotes: toolInput.confidenceNotes || null,
+      form: mergeIntakeIntoForm(validated),
+      missingFields: validated.missingFields || [],
+      confidenceNotes: validated.confidenceNotes || null,
       source: 'chat',
     });
   }

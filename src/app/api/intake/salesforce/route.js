@@ -11,6 +11,7 @@ import {
   buildSessionCookie,
 } from '@/lib/server/session';
 import { runIntakeExtraction } from '@/lib/server/intakeTool';
+import { checkRateLimit, rateLimitResponse } from '@/lib/server/rateLimit';
 
 const MODEL = 'claude-sonnet-4-6';
 
@@ -18,21 +19,29 @@ const MODEL = 'claude-sonnet-4-6';
 // reason over. Includes every raw field name so the model can match on
 // custom-field labels (Platforms__c, Current_MMP__c, etc.) without us
 // having to bake a translation map here.
+//
+// Wrapped in <external_content> tags so the intake system prompt can tell
+// the model to treat the body as data, not instructions — mitigates prompt
+// injection if a Salesforce record ever contains adversarial text.
 function formatAccountForClaude(account, extras = {}) {
   const lines = [];
-  lines.push('# Salesforce Account');
+  lines.push('<external_content source="salesforce_account">');
   for (const [key, value] of Object.entries(account)) {
     if (value === null || value === undefined || value === '') continue;
     lines.push(`- ${key}: ${value}`);
   }
   for (const [label, block] of Object.entries(extras)) {
     if (!block) continue;
-    lines.push(`\n# ${label}\n${block}`);
+    lines.push(`\n[${label}]\n${block}`);
   }
+  lines.push('</external_content>');
   return lines.join('\n');
 }
 
 export async function POST(req) {
+  const limit = checkRateLimit(req, { bucket: 'intake', limit: 15, windowMs: 60_000 });
+  if (!limit.ok) return rateLimitResponse(limit.retryAfter);
+
   let body;
   try {
     body = await req.json();
