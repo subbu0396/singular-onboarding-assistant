@@ -1,0 +1,21 @@
+{
+  "id": "flipkart-email",
+  "description": "Hey team,\n\nJust got off a call with Flipkart. They're an Indian e-commerce shop and they want to consolidate onto Branch by end of Q3. Right now they're on Firebase for Android and nothing for iOS (they only launched iOS six months ago). Both platforms need coverage plus React Native for one line of business. Data-driven attribution. They already have a BigQuery warehouse and use Segment as their CDP. Backend is Python. They want kickoff in two weeks and want it accelerated — the CMO is pushing hard.\n\nS2S postbacks and Meta Ads to start; SKAdNetwork later.",
+  "expected": {
+    "clientName": "Flipkart",
+    "targetMmp": "Branch",
+    "industry": "E-commerce",
+    "primaryMarket": "India",
+    "platforms": ["iOS", "Android", "React Native"],
+    "currentMmp": "Firebase / Google Analytics",
+    "attributionModel": "Data Driven",
+    "integrationMethods": ["S2S Postbacks", "Meta Ads"],
+    "dataExportMethods": ["BigQuery"],
+    "backendLanguage": "Python",
+    "hasDataWarehouse": true,
+    "usesCdp": true,
+    "cdpName": "Segment",
+    "targetGoLiveDate": null,
+    "onboardingUrgency": "Accelerated 2-3 weeks"
+  }
+}

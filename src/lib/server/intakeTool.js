@@ -18,7 +18,7 @@ import {
   AUTH_METHODS,
   URGENCY_OPTIONS,
   INITIAL_FORM_STATE,
-} from '@/lib/formConfig';
+} from '../formConfig.js';
 
 export const INTAKE_TOOL_NAME = 'capture_client_intake';
 

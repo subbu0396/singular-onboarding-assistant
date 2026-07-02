@@ -1,0 +1,14 @@
+{
+  "id": "rovio-terse",
+  "description": "Rovio, gaming, iOS+Android+Unity, moving from Adjust to Singular. Target Aug 15. Multi-touch attribution. Europe.",
+  "expected": {
+    "clientName": "Rovio",
+    "targetMmp": "Singular",
+    "industry": "Gaming",
+    "primaryMarket": "Europe",
+    "platforms": ["iOS", "Android", "Unity"],
+    "currentMmp": "Adjust",
+    "attributionModel": "Multi-Touch",
+    "targetGoLiveDate": null
+  }
+}

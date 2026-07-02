@@ -1,0 +1,18 @@
+{
+  "id": "vague-date",
+  "description": "PolyBank, fintech, US market, iOS+Android, currently no MMP, targeting Singular. Want to go live mid-August. Uses SAML SSO. Node.js backend, no warehouse, no CDP.",
+  "expected": {
+    "clientName": "PolyBank",
+    "targetMmp": "Singular",
+    "industry": "Fintech",
+    "primaryMarket": "US",
+    "platforms": ["iOS", "Android"],
+    "currentMmp": "None",
+    "authMethod": "SAML SSO",
+    "backendLanguage": "Node.js",
+    "hasDataWarehouse": false,
+    "usesCdp": false,
+    "targetGoLiveDate": null
+  },
+  "notes": "targetGoLiveDate must be null because 'mid-August' isn't a specific date. If the model guesses 2026-08-15, that's a fail — leaving it null and adding it to missingFields is the correct behavior."
+}

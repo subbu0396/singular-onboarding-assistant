@@ -1,0 +1,21 @@
+{
+  "id": "gaming-migration",
+  "description": "PixelPunch Studios. Mobile gaming shop out of SEA. Currently AppsFlyer, moving to Singular by 2026-07-30. They ship iOS, Android, and use Unity for the game engine layer. Data-driven attribution. Backend Go, no warehouse, no CDP, OAuth 2.0 auth. Integration methods: S2S Postbacks and Meta Ads. Standard onboarding pace. SDK Events for event tracking.",
+  "expected": {
+    "clientName": "PixelPunch Studios",
+    "targetMmp": "Singular",
+    "industry": "Gaming",
+    "primaryMarket": "SEA",
+    "platforms": ["iOS", "Android", "Unity"],
+    "currentMmp": "AppsFlyer",
+    "attributionModel": "Data Driven",
+    "integrationMethods": ["S2S Postbacks", "Meta Ads"],
+    "eventTrackingMethod": "SDK Events",
+    "backendLanguage": "Go",
+    "hasDataWarehouse": false,
+    "usesCdp": false,
+    "authMethod": "OAuth 2.0",
+    "targetGoLiveDate": "2026-07-30",
+    "onboardingUrgency": "Standard 4-6 weeks"
+  }
+}
