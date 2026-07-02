@@ -1,0 +1,25 @@
+{
+  "id": "fintech-cdp",
+  "notes": "Fintech with a CDP + warehouse + tight timeline. Every extra field is filled. Tests that Skill 3 (Integration Type) and Skill 4 (Technical Environment) reflect the CDP/warehouse coupling correctly rather than treating them as decoration.",
+  "form": {
+    "clientName": "Meridian Capital Digital",
+    "targetMmp": "AppsFlyer",
+    "industry": "Fintech",
+    "primaryMarket": "MENA",
+    "platforms": ["iOS", "Android", "Flutter"],
+    "currentMmp": "Kochava",
+    "attributionModel": "Last Touch",
+    "integrationMethods": ["S2S Postbacks", "SKAdNetwork", "Custom Dashboard Export"],
+    "dataExportMethods": ["Snowflake", "S3"],
+    "eventTrackingMethod": "Both",
+    "backendLanguage": "Java",
+    "hasDataWarehouse": true,
+    "usesCdp": true,
+    "cdpName": "mParticle",
+    "authMethod": "SAML SSO",
+    "targetGoLiveDate": "2026-10-31",
+    "onboardingUrgency": "Critical <2 weeks",
+    "seAvailabilityNotes": "Kickoff blocked until 20 Oct due to another critical migration.",
+    "engineeringAvailabilityNotes": "Two backend engineers dedicated full-time; iOS/Android leads shared with another project."
+  }
+}

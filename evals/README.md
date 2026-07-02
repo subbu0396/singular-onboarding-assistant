@@ -39,12 +39,63 @@ Only fields present in `expected` are scored. Leave a field out of `expected` if
 
 **Adding fixtures.** Pick a real client description you've seen, redact any PII, save as a new JSON file. Aim for coverage across: verbose vs terse input, missing information, vague dates, unusual industries, migration wording, brand-new prospects.
 
-## Queued (not built yet)
+### `npm run eval:docs`
 
-- **`eval:docs`** — LLM-judge over the generated Runbook / FAQ / Checklist. 5 fixture forms → full 6-skill pipeline → Claude scores each doc on {specificity, actionability, no-hallucination, structure} 1-5. Heavy (each fixture is a full generation) but the highest-value quality signal.
-- **`eval:smoke`** — end-to-end smoke: one canonical form runs the whole pipeline in-process, asserts all 6 skills complete and all 3 docs are non-empty. Cheap way to catch crash regressions like the `runAgent` signature bug that shipped twice.
+End-to-end quality + smoke eval over the generated Runbook / FAQ / Checklist.
 
-Both are follow-up PRs — they need either a running dev server or a refactor of `/api/generate` to expose the pipeline as a library function. Ship intake alone in this PR to keep the review focused.
+**How it runs.** For each fixture, hits `${EVAL_BASE_URL}/api/generate` (default `http://localhost:3000`), parses the SSE stream to assemble the three docs, then ships {form, docs} to Claude as an **LLM judge** that scores each doc on four dimensions 1-5:
+
+- **specificity** — does it name specific endpoints, SDK versions, config values grounded in the form?
+- **actionability** — can an engineer execute each step as written?
+- **no_hallucination** — does it invent details not supported by the form? 5 = every specific traces back to the form.
+- **structure** — mandated section structure + markdown format.
+
+Rubric is strict: 3 is the average, not the floor. Prevents ceiling-hugging.
+
+**Also acts as the smoke test.** Any fixture that doesn't emit `skill_complete` for all 6 skills or that produces an empty doc is a hard fail — reported before the judge runs and exits the process with code 2 so CI (if you ever add it) can catch it.
+
+**How to run.** Costs Anthropic tokens for both pipeline AND judge, so run intentionally.
+
+```
+# terminal 1
+npm run dev
+
+# terminal 2
+npm run eval:docs
+```
+
+Or point at a deployed URL — no dev server needed:
+
+```
+EVAL_BASE_URL=https://singular-onboarding-assistant.vercel.app npm run eval:docs
+```
+
+**Fixture format** (`evals/fixtures/docs/*.json`):
+
+```json
+{
+  "id": "some-slug",
+  "notes": "Optional — what makes this fixture stress-test the pipeline.",
+  "form": {
+    "clientName": "Acme Corp",
+    "targetMmp": "Singular",
+    ...every field the pipeline reads...
+  }
+}
+```
+
+No expected output — the LLM judge scores in absolute terms. Add fixtures that cover different shapes: verbose form, thin form, unusual industry, CDP + warehouse combo, tight timeline, etc.
+
+**Interpreting results.** Look for regressions in the per-doc-type per-dimension table:
+
+```
+By doc type (avg across fixtures):
+  runbook    speci=4.33  actio=4.00  no_ha=4.67  struc=4.33
+  faq        speci=3.67  actio=3.33  no_ha=4.33  struc=4.00
+  checklist  speci=4.00  actio=4.67  no_ha=4.33  struc=4.67
+```
+
+If `faq.actionability` drops from 3.33 to 2.5 after a prompt tweak, that's the specific thing to fix. If everything drops by 0.5 across the board, you probably regressed the shared system block. Reports accumulate in `evals/results/docs-*.json` for cross-run diffing.
 
 ## Interpreting results
 
