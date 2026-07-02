@@ -60,7 +60,10 @@ export default function SignInGate({ children }) {
       setSignInError(AUTH_ERROR_COPY.not_configured);
       return;
     }
-    const redirectTo = `${window.location.origin}/api/auth/session/callback?next=/`;
+    // Bare callback URL — Supabase's Redirect URL matcher is fussy about
+    // query strings. The callback route defaults `next` to `/`, so we don't
+    // lose anything by dropping the param here.
+    const redirectTo = `${window.location.origin}/api/auth/session/callback`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
