@@ -40,10 +40,6 @@ export const MMP_DOMAIN_ALLOWLIST = {
   'mparticle.com': 'mParticle',
   'segment.com': 'Segment',
   'twilio.com': 'Segment',
-
-  // TEMPORARY — remove before real users. Lets the maintainer sign in
-  // with a personal Google account to test the flow end-to-end.
-  'gmail.com': 'Testing',
 };
 
 /**

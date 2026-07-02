@@ -7,6 +7,7 @@ import IntakeChat from '@/components/IntakeChat';
 import SignInGate from '@/components/SignInGate';
 import UserChip from '@/components/UserChip';
 import { DOC_TYPES } from '@/lib/formConfig';
+import { useSession } from '@/lib/useSession';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
 
@@ -103,6 +104,8 @@ export default function Home() {
   const flushScheduledRef = useRef(false);
   // Guard so autosave fires exactly once per completed generation.
   const savedForRef = useRef(null);
+
+  const session = useSession();
 
   const flushDeltas = useCallback(() => {
     flushScheduledRef.current = false;
@@ -380,6 +383,9 @@ export default function Home() {
     if (!DOC_KEYS.every((k) => documents[k]?.trim())) return;
     if (DOC_KEYS.some((k) => loadingDocs[k])) return;
     if (DOC_KEYS.some((k) => errors[k])) return;
+    // Guests aren't authenticated, so /api/generations would 401 and the
+    // row couldn't be attributed anyway. Skip the write silently.
+    if (session.authConfigured && !session.signedIn) return;
     // Guard: only save once per generation (client name + go-live is
     // enough entropy to distinguish two consecutive submissions).
     const generationKey = `${formData.clientName}::${formData.targetGoLiveDate}::${formData.targetMmp}`;
@@ -404,7 +410,7 @@ export default function Home() {
         console.warn('auto-save network error', err?.message || err);
       }
     })();
-  }, [isLoading, formData, documents, loadingDocs, errors]);
+  }, [isLoading, formData, documents, loadingDocs, errors, session.authConfigured, session.signedIn]);
 
   return (
     <SignInGate>
@@ -431,6 +437,27 @@ export default function Home() {
       <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
         {view === 'form' && (
           <>
+            {session.guest && (
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-2 text-xs text-amber-200">
+                <span>
+                  You&apos;re browsing as a guest — generations won&apos;t be saved to your history.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    try {
+                      window.sessionStorage.removeItem('mmp_guest_mode');
+                    } catch {
+                      // no-op
+                    }
+                    window.location.reload();
+                  }}
+                  className="rounded-full border border-amber-500/40 px-2 py-0.5 text-[11px] font-medium text-amber-100 hover:bg-amber-500/20"
+                >
+                  Sign in
+                </button>
+              </div>
+            )}
             <div className="mb-6 flex flex-col items-center gap-3 text-center">
               <div>
                 <h2 className="text-2xl font-bold text-white sm:text-3xl">
@@ -459,7 +486,7 @@ export default function Home() {
               initialForm={intakePrefill}
               initialAutofillMeta={intakeMeta}
             />
-            <RecentGenerations onOpen={openPastGeneration} />
+            {session.signedIn && <RecentGenerations onOpen={openPastGeneration} />}
           </>
         )}
 
