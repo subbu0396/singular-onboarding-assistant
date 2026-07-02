@@ -19,9 +19,26 @@ const AUTH_ERROR_COPY = {
  * Public share pages (/share/[token]) don't mount this component, so
  * recipients still see the shared docs without needing an account.
  */
+const GUEST_KEY = 'mmp_guest_mode';
+
 export default function SignInGate({ children }) {
   const [status, setStatus] = useState({ loading: true });
   const [signInError, setSignInError] = useState(null);
+  // Guest mode: SE clicked "Continue without signing in". Persisted in
+  // sessionStorage so an in-tab refresh doesn't bounce them back to the
+  // sign-in screen. Cleared when the tab is closed.
+  const [guestMode, setGuestMode] = useState(false);
+
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(GUEST_KEY) === '1') {
+        setGuestMode(true);
+      }
+    } catch {
+      // sessionStorage disabled — guest mode just won't persist across
+      // refresh; not fatal.
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +107,16 @@ export default function SignInGate({ children }) {
     return children;
   }
 
-  if (status.signedIn) return children;
+  if (status.signedIn || guestMode) return children;
+
+  const continueAsGuest = () => {
+    try {
+      window.sessionStorage.setItem(GUEST_KEY, '1');
+    } catch {
+      // no-op
+    }
+    setGuestMode(true);
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
@@ -100,7 +126,7 @@ export default function SignInGate({ children }) {
         </div>
         <h1 className="text-xl font-semibold text-white">MMP Onboarding Assistant</h1>
         <p className="mt-2 text-sm text-slate-400">
-          Sign in with your work Google account to continue.
+          Sign in to keep your generations, or fill the form as a guest.
         </p>
         <button
           type="button"
@@ -109,8 +135,15 @@ export default function SignInGate({ children }) {
         >
           Sign in with Google
         </button>
+        <button
+          type="button"
+          onClick={continueAsGuest}
+          className="btn-secondary mt-2 w-full text-sm"
+        >
+          Continue without signing in
+        </button>
         <p className="mt-4 text-[11px] text-slate-500">
-          Access is limited to SEs at approved MMP, engagement, analytics, and CDP platforms.
+          Sign-in is limited to SEs at approved MMP, engagement, analytics, and CDP platforms. Guests can generate docs but nothing is saved to their history.
         </p>
         {signInError && (
           <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-left text-xs text-red-300">
