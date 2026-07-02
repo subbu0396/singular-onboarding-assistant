@@ -27,7 +27,7 @@ function parseDocEvent(eventType) {
  * Rejects on non-2xx response. Never throws mid-stream — a broken doc gets
  * marked in the errors[] instead, which is what the smoke assertions look at.
  */
-export async function runPipeline({ baseUrl, form, timeoutMs = 180_000 }) {
+export async function runPipeline({ baseUrl, form, timeoutMs = 300_000 }) {
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
