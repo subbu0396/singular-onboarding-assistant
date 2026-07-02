@@ -1,0 +1,15 @@
+{
+  "id": "minimal-name-only",
+  "description": "New prospect called MegaTravel. That's all I have for now.",
+  "expected": {
+    "clientName": "MegaTravel",
+    "targetMmp": null,
+    "industry": null,
+    "primaryMarket": null,
+    "platforms": [],
+    "currentMmp": null,
+    "targetGoLiveDate": null,
+    "onboardingUrgency": null
+  },
+  "notes": "Should populate only clientName and leave everything else null. Discipline test — hallucinating Travel as industry would fail."
+}

@@ -1,0 +1,22 @@
+{
+  "id": "airtel-verbose",
+  "description": "Airtel Digital is a large Indian telco moving their mobile ad measurement to Singular. They're currently on AppsFlyer and want to migrate over the next couple of months. Both iOS and Android apps are in scope. Their engineering team runs Node.js on the backend, uses Snowflake as a warehouse, and doesn't have a CDP. Auth is OAuth 2.0 based. Primary market is India, and they'd like to be live by August 15, 2026. Standard 4-6 week onboarding. We'll want S2S postbacks and Google Ads integration to start.",
+  "expected": {
+    "clientName": "Airtel Digital",
+    "targetMmp": "Singular",
+    "industry": "Other",
+    "primaryMarket": "India",
+    "platforms": ["iOS", "Android"],
+    "currentMmp": "AppsFlyer",
+    "attributionModel": null,
+    "integrationMethods": ["S2S Postbacks", "Google Ads"],
+    "dataExportMethods": ["Snowflake"],
+    "eventTrackingMethod": null,
+    "backendLanguage": "Node.js",
+    "hasDataWarehouse": true,
+    "usesCdp": false,
+    "authMethod": "OAuth 2.0",
+    "targetGoLiveDate": "2026-08-15",
+    "onboardingUrgency": "Standard 4-6 weeks"
+  }
+}

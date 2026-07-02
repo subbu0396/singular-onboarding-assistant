@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "seed:kb": "node scripts/seedKnowledgeBase.mjs"
+    "seed:kb": "node scripts/seedKnowledgeBase.mjs",
+    "eval:intake": "node evals/runners/intake.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.40.1",

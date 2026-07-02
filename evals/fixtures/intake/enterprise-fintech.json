@@ -1,0 +1,22 @@
+{
+  "id": "enterprise-fintech",
+  "description": "Client: Meridian Capital Digital. Enterprise fintech, primary market MENA. Currently on Kochava, migrating to AppsFlyer. iOS, Android, and Flutter across three product lines. Attribution model preference: last touch. Backend is Java, they have a Snowflake warehouse plus S3 exports. Uses mParticle as their CDP. Auth method: API Key. Target go-live 2026-09-30. Critical priority — regulatory deadline. Both S2S postbacks and SKAdNetwork required; also Custom Dashboard Export.",
+  "expected": {
+    "clientName": "Meridian Capital Digital",
+    "targetMmp": "AppsFlyer",
+    "industry": "Fintech",
+    "primaryMarket": "MENA",
+    "platforms": ["iOS", "Android", "Flutter"],
+    "currentMmp": "Kochava",
+    "attributionModel": "Last Touch",
+    "integrationMethods": ["S2S Postbacks", "SKAdNetwork", "Custom Dashboard Export"],
+    "dataExportMethods": ["Snowflake", "S3"],
+    "backendLanguage": "Java",
+    "hasDataWarehouse": true,
+    "usesCdp": true,
+    "cdpName": "mParticle",
+    "authMethod": "API Key",
+    "targetGoLiveDate": "2026-09-30",
+    "onboardingUrgency": "Critical <2 weeks"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "ott-thin",
+  "description": "StreamNow, OTT/Media company in the US. React Native only. Going with Adjust. No current MMP. Kickoff 2026-11-01.",
+  "expected": {
+    "clientName": "StreamNow",
+    "targetMmp": "Adjust",
+    "industry": "OTT/Media",
+    "primaryMarket": "US",
+    "platforms": ["React Native"],
+    "currentMmp": "None",
+    "targetGoLiveDate": "2026-11-01",
+    "backendLanguage": null,
+    "authMethod": null
+  }
+}
