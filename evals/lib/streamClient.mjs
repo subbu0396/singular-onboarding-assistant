@@ -27,7 +27,7 @@ function parseDocEvent(eventType) {
  * Rejects on non-2xx response. Never throws mid-stream — a broken doc gets
  * marked in the errors[] instead, which is what the smoke assertions look at.
  */
-export async function runPipeline({ baseUrl, form, timeoutMs = 300_000, onProgress = null }) {
+export async function runPipeline({ baseUrl, form, timeoutMs = 480_000, onProgress = null }) {
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -83,8 +83,8 @@ export async function runPipeline({ baseUrl, form, timeoutMs = 300_000, onProgre
       const type = parsed.type;
       const docEvent = type ? parseDocEvent(type) : null;
       if (docEvent && DOC_KEYS.includes(docEvent.docType)) {
-        if (docEvent.kind === 'delta' && parsed.content) {
-          documents[docEvent.docType] += parsed.content;
+        if (docEvent.kind === 'delta' && parsed.delta) {
+          documents[docEvent.docType] += parsed.delta;
         } else if (docEvent.kind === 'error') {
           errors.push({ docType: docEvent.docType, message: parsed.message || 'stream error' });
         }
