@@ -91,10 +91,26 @@ async function main() {
     const record = { id: fixture.id };
 
     let pipelineOut;
+    const fixtureStarted = Date.now();
     try {
-      pipelineOut = await runPipeline({ baseUrl: BASE_URL, form: fixture.form });
+      pipelineOut = await runPipeline({
+        baseUrl: BASE_URL,
+        form: fixture.form,
+        onProgress: (evt) => {
+          const secs = Math.round((Date.now() - fixtureStarted) / 1000);
+          if (evt.kind === 'skill_start') {
+            process.stdout.write(`\n    [+${secs}s] start   ${evt.skillId}`);
+          } else if (evt.kind === 'skill_complete') {
+            process.stdout.write(`\n    [+${secs}s] done    ${evt.skillId}`);
+          } else if (evt.kind === 'skill_error') {
+            process.stdout.write(`\n    [+${secs}s] FAIL    ${evt.skillId}: ${evt.message}`);
+          }
+        },
+      });
+      process.stdout.write('\n    ');
     } catch (err) {
-      console.log(`PIPELINE ERROR: ${err.message}`);
+      const secs = Math.round((Date.now() - fixtureStarted) / 1000);
+      console.log(`\n    PIPELINE ERROR after ${secs}s: ${err.message}`);
       results.push({ ...record, error: err.message, smoke: { passed: false } });
       continue;
     }

@@ -27,7 +27,7 @@ function parseDocEvent(eventType) {
  * Rejects on non-2xx response. Never throws mid-stream — a broken doc gets
  * marked in the errors[] instead, which is what the smoke assertions look at.
  */
-export async function runPipeline({ baseUrl, form, timeoutMs = 300_000 }) {
+export async function runPipeline({ baseUrl, form, timeoutMs = 300_000, onProgress = null }) {
   const started = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -90,11 +90,16 @@ export async function runPipeline({ baseUrl, form, timeoutMs = 300_000 }) {
         }
         continue;
       }
-      if (type === 'skill_start') skills[parsed.skillId] = 'active';
-      else if (type === 'skill_complete') skills[parsed.skillId] = 'complete';
-      else if (type === 'skill_error') {
+      if (type === 'skill_start') {
+        skills[parsed.skillId] = 'active';
+        onProgress?.({ kind: 'skill_start', skillId: parsed.skillId });
+      } else if (type === 'skill_complete') {
+        skills[parsed.skillId] = 'complete';
+        onProgress?.({ kind: 'skill_complete', skillId: parsed.skillId });
+      } else if (type === 'skill_error') {
         skills[parsed.skillId] = 'error';
         errors.push({ skillId: parsed.skillId, message: parsed.message || 'skill error' });
+        onProgress?.({ kind: 'skill_error', skillId: parsed.skillId, message: parsed.message });
       }
     }
   }
