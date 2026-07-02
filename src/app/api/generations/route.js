@@ -4,9 +4,19 @@ import {
   saveGeneration,
   listRecentGenerations,
 } from '@/lib/server/generations';
+import { getCurrentSE, isSupabaseAuthConfigured } from '@/lib/server/supabaseAuth';
 
 export async function POST(req) {
   try {
+    // When auth is on, a signed-in SE is required — otherwise the row would
+    // land unowned and be invisible to its author on the next page load.
+    let ownerId = null;
+    if (isSupabaseAuthConfigured()) {
+      const se = await getCurrentSE(req);
+      if (!se) return Response.json({ error: 'not authenticated' }, { status: 401 });
+      ownerId = se.userId;
+    }
+
     const body = await req.json();
     const { form, documents } = body || {};
     if (!form || !documents) {
@@ -31,7 +41,7 @@ export async function POST(req) {
       );
     }
 
-    const saved = await saveGeneration({ form, documents });
+    const saved = await saveGeneration({ form, documents, ownerId });
     if (!saved) {
       return Response.json(
         { error: 'save failed — Supabase not configured or write rejected' },
@@ -48,9 +58,15 @@ export async function POST(req) {
   }
 }
 
-export async function GET() {
+export async function GET(req) {
   try {
-    const rows = await listRecentGenerations();
+    let ownerId = null;
+    if (isSupabaseAuthConfigured()) {
+      const se = await getCurrentSE(req);
+      if (!se) return Response.json({ generations: [] });
+      ownerId = se.userId;
+    }
+    const rows = await listRecentGenerations({ ownerId });
     return Response.json({ generations: rows });
   } catch (err) {
     console.error('GET /api/generations error', err);
