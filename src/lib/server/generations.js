@@ -55,7 +55,7 @@ function sanitizeForm(form) {
   return out;
 }
 
-export async function saveGeneration({ form, documents }) {
+export async function saveGeneration({ form, documents, ownerId = null }) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -71,6 +71,10 @@ export async function saveGeneration({ form, documents }) {
     share_token: shareToken,
     share_expires_at: shareExpiresAt.toISOString(),
     created_at: now.toISOString(),
+    // Nullable — when auth isn't configured the row is unowned. Once SE
+    // auth ships, unowned rows are hidden from the Recent list by
+    // listRecentGenerations's owner filter.
+    owner_id: ownerId,
   };
 
   const { data, error } = await supabase
@@ -86,14 +90,19 @@ export async function saveGeneration({ form, documents }) {
   return data;
 }
 
-export async function listRecentGenerations(limit = RECENT_LIMIT) {
+export async function listRecentGenerations({ ownerId = null, limit = RECENT_LIMIT } = {}) {
   const supabase = getSupabaseClient();
   if (!supabase) return [];
-  const { data, error } = await supabase
+  let query = supabase
     .from('generations')
     .select('id, client_name, target_mmp, created_at, share_token, share_expires_at')
     .order('created_at', { ascending: false })
     .limit(limit);
+  // Auth-on: only surface rows this SE owns. Legacy rows with owner_id
+  // NULL are intentionally hidden per Phase 10 spec. Auth-off (local
+  // dev without Supabase Auth): return everything so the app still works.
+  if (ownerId) query = query.eq('owner_id', ownerId);
+  const { data, error } = await query;
   if (error) {
     console.error('listRecentGenerations failed', error.message);
     return [];
@@ -101,14 +110,15 @@ export async function listRecentGenerations(limit = RECENT_LIMIT) {
   return data || [];
 }
 
-export async function getGenerationById(id) {
+export async function getGenerationById(id, { ownerId = null } = {}) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
-  const { data, error } = await supabase
+  let query = supabase
     .from('generations')
-    .select('id, client_name, target_mmp, form_snapshot, documents, created_at, share_token, share_expires_at')
-    .eq('id', id)
-    .maybeSingle();
+    .select('id, client_name, target_mmp, form_snapshot, documents, created_at, share_token, share_expires_at, owner_id')
+    .eq('id', id);
+  if (ownerId) query = query.eq('owner_id', ownerId);
+  const { data, error } = await query.maybeSingle();
   if (error) {
     console.error('getGenerationById failed', error.message);
     return null;

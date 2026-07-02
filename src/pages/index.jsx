@@ -4,6 +4,8 @@ import ResultsTabs from '@/components/ResultsTabs';
 import IntegrationsMenu from '@/components/IntegrationsMenu';
 import RecentGenerations from '@/components/RecentGenerations';
 import IntakeChat from '@/components/IntakeChat';
+import SignInGate from '@/components/SignInGate';
+import UserChip from '@/components/UserChip';
 import { DOC_TYPES } from '@/lib/formConfig';
 
 const DOC_KEYS = [DOC_TYPES.RUNBOOK, DOC_TYPES.FAQ, DOC_TYPES.CHECKLIST];
@@ -405,6 +407,7 @@ export default function Home() {
   }, [isLoading, formData, documents, loadingDocs, errors]);
 
   return (
+    <SignInGate>
     <div className="min-h-screen bg-slate-950">
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-950/80 backdrop-blur-sm">
@@ -418,7 +421,10 @@ export default function Home() {
               <p className="truncate text-xs text-slate-500">AI-powered onboarding docs for any attribution platform</p>
             </div>
           </div>
-          <IntegrationsMenu />
+          <div className="flex items-center gap-2">
+            <IntegrationsMenu />
+            <UserChip />
+          </div>
         </div>
       </header>
 
@@ -497,5 +503,6 @@ export default function Home() {
         MMP Onboarding Assistant · Internal use only
       </footer>
     </div>
+    </SignInGate>
   );
 }
